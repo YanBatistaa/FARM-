@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>ZÊNITE — a jornada até o seu ápice</title>
+  <meta name="description" content="ZÊNITE — app gamificado de produtividade, hábitos, finanças e segundo cérebro." />
+  <meta name="theme-color" content="#0B0913" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.svg" />
+  <link rel="icon" href="icons/icon-192.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app">
+    <aside class="sidebar" id="sidebar"><!-- preenchido por app.js --></aside>
+    <main class="main">
+      <div class="topbar" id="topbar"></div>
+      <div class="view" id="view"></div>
+    </main>
+  </div>
+  <div class="scrim" id="scrim"></div>
+  <div id="modal-root"></div>
+  <div id="toasts"></div>
+
+  <script src="app.js"></script>
+  <script>
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => {
+        navigator.serviceWorker.register("sw.js").catch(() => {});
+      });
+    }
+  </script>
+</body>
+</html>
