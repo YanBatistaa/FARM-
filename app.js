@@ -134,6 +134,7 @@ const DEFAULTS = {
     metaBatidaHoje: false,
     onboardingDone: false,
     bossHp: 0, bossMaxHp: 100, bossName: '', bossLore: '', bossDefeated: 0, bossActive: false,
+    pet: { name: '', stage: 0, xp: 0, evolutions: 0, },
   },
   missions: [],
   habits: [],
@@ -875,6 +876,9 @@ function toggleMission(id) {
   showToast(`✅ ${m.title} concluída! +${m.reward.xp}XP +${m.reward.coins} moedas`, 'gold');
   // Boss damage on mission complete
   bossDamage(m.reward.xp);
+  // Pet XP
+  const petP = Store.get('player');
+  updatePet(petP);
 
   // Check for loot box drop (25% chance)
   if (Math.random() < 0.25) {
@@ -969,6 +973,15 @@ function viewPersonagem() {
       <div class="kpi"><div class="ico">${icon('check')}</div><div class="val">${p.totalMissionsDone||0}</div><div class="lbl">Missões</div></div>
       <div class="kpi green"><div class="ico">${icon('activity')}</div><div class="val">${p.totalHabitsDone||0}</div><div class="lbl">Hábitos</div></div>
       <div class="kpi gold"><div class="ico">${icon('clock')}</div><div class="val">${p.totalFocusMinutes||0}</div><div class="lbl">Min. Foco</div></div>
+    </div>
+    <div class="card" style="margin-top:16px;">
+      <h3><span class="accent"></span>Mascote</h3>
+      <div style="display:flex;align-items:center;gap:16px;margin-top:8px;">
+        <span style="font-size:48px;">${PET_STAGES[p.pet?.stage||0]?.icon||'🥚'}</span>
+        <div><div style="font-weight:700;font-size:16px;">${PET_STAGES[p.pet?.stage||0]?.name||'Ovo'}</div>
+        <div class="muted" style="font-size:13px;">${PET_STAGES[p.pet?.stage||0]?.desc||''}</div>
+        <div style="margin-top:4px;display:flex;gap:6px;"><span class="tag">XP: ${p.pet?.xp||0}</span><span class="tag">Evoluções: ${p.pet?.evolutions||0}</span></div></div>
+      </div>
     </div>
     <div class="card" style="margin-top:20px;">
       <h3><span class="accent"></span>Atributos</h3>
@@ -2315,6 +2328,31 @@ function viewConfiguracoes() {
 
 // ——— CLOUD PLACEHOLDER VIEWS ———
 function viewSocial() { cloudPlaceholder('Social', 'users'); }
+// ——— Mascote/Pet ———
+const PET_STAGES = [
+  { icon: '🥚', name: 'Ovo', desc: 'Choca seu ovo com missões diárias!' },
+  { icon: '🐣', name: 'Filhote', desc: 'Um filhote curioso. Streak ≥ 3 para evoluir.' },
+  { icon: '🐥', name: 'Jovem', desc: 'Crescendo forte. Streak ≥ 7 para evoluir.' },
+  { icon: '🐦', name: 'Adulto', desc: 'Uma criatura leal. Streak ≥ 14 para evoluir.' },
+  { icon: '🦅', name: 'Lendário', desc: 'Forma lendária! Streak ≥ 30.' },
+];
+const PET_STREAK_REQ = [0, 3, 7, 14, 30];
+function getPetStage(streak) {
+  let stage = 0;
+  PET_STREAK_REQ.forEach((req, i) => { if (streak >= req) stage = i; });
+  return stage;
+}
+function updatePet(p) {
+  if (!p.pet) p.pet = { name: '', stage: 0, xp: 0, evolutions: 0 };
+  const newStage = getPetStage(p.streak || 0);
+  if (newStage > (p.pet.stage || 0)) {
+    p.pet.stage = newStage;
+    p.pet.evolutions = (p.pet.evolutions || 0) + 1;
+    showToast(`🐾 Seu mascote evoluiu para ${PET_STAGES[newStage].icon} ${PET_STAGES[newStage].name}!`, 'gold');
+  }
+  // Give pet XP on missions
+  p.pet.xp = (p.pet.xp || 0) + 1;
+}
 // ——— Boss Fights ———
 const BOSSES = [
   { name: 'A Procrastinação', lore: 'Sombra que sussurra "depois eu faço". Enfraquece com missões rápidas.', hp: 80, icon: '👿' },
