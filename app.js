@@ -133,6 +133,7 @@ const DEFAULTS = {
     dailyXp: 0,
     metaBatidaHoje: false,
     onboardingDone: false,
+    bossHp: 0, bossMaxHp: 100, bossName: '', bossLore: '', bossDefeated: 0, bossActive: false,
   },
   missions: [],
   habits: [],
@@ -622,6 +623,11 @@ function viewDashboard() {
         <h3><span class="accent"></span>Últimas Missões</h3>
         ${recent.length?recent.map(m => `<div class="lrow"><div class="lbody"><div class="ltitle">${m.title}</div><div class="lsub">${DIFFICULTIES[m.difficulty]?.label||''} · +${m.reward?.xp||0}XP</div></div></div>`).join(''):'<div class="muted">Nenhuma missão concluída ainda.</div>'}
       </div>
+      ${p.bossActive ? `<div class="card" style="border-color:var(--danger);">
+        <div class="between" style="margin-bottom:8px;"><h3>👿 ${p.bossName||'Boss'}</h3><span class="tag hp">${p.bossHp}/${p.bossMaxHp}</span></div>
+        <div class="bar" style="height:14px;background:var(--surface-3);"><i style="width:${Math.round((p.bossHp||0)/(p.bossMaxHp||1)*100)}%;background:linear-gradient(90deg,var(--hp),var(--danger));"></i></div>
+        <div class="muted" style="font-size:12px;margin-top:6px;">💬 ${p.bossLore||''}</div>
+      </div>` : ''}
       <div class="card">
         <h3><span class="accent"></span>Status</h3>
         <div style="display:flex;flex-direction:column;gap:12px;">
@@ -867,6 +873,9 @@ function toggleMission(id) {
   }
   playSoundIfEnabled('complete');
   showToast(`✅ ${m.title} concluída! +${m.reward.xp}XP +${m.reward.coins} moedas`, 'gold');
+  // Boss damage on mission complete
+  bossDamage(m.reward.xp);
+
   // Check for loot box drop (25% chance)
   if (Math.random() < 0.25) {
     const lootTypes = [
@@ -2306,6 +2315,48 @@ function viewConfiguracoes() {
 
 // ——— CLOUD PLACEHOLDER VIEWS ———
 function viewSocial() { cloudPlaceholder('Social', 'users'); }
+// ——— Boss Fights ———
+const BOSSES = [
+  { name: 'A Procrastinação', lore: 'Sombra que sussurra "depois eu faço". Enfraquece com missões rápidas.', hp: 80, icon: '👿' },
+  { name: 'Caos das Tarefas', lore: 'Labirinto de prazos e pendências. Só organização vence.', hp: 120, icon: '🌀' },
+  { name: 'O Desânimo', lore: 'Névoa que drena sua energia. Derrote com consistência.', hp: 160, icon: '🌑' },
+  { name: 'Mestre da Distração', lore: 'Gênio das notificações e dopamina fácil. Foco é a arma.', hp: 220, icon: '📱' },
+  { name: 'Titã do Burnout', lore: 'Chefe final. Só os disciplinados sobrevivem.', hp: 350, icon: '🔥' },
+];
+function spawnBoss() {
+  const p = Store.get('player');
+  const idx = Math.min(Math.floor(p.bossDefeated || 0), BOSSES.length - 1);
+  const b = BOSSES[idx];
+  p.bossName = b.name; p.bossLore = b.lore;
+  p.bossMaxHp = b.hp + (p.bossDefeated || 0) * 30;
+  p.bossHp = p.bossMaxHp;
+  p.bossActive = true;
+  p.bossIcon = b.icon;
+  Store.set('player', p);
+  State.changed('player');
+}
+function bossDamage(amount) {
+  const p = Store.get('player');
+  if (!p.bossActive) {
+    // Check if should spawn: every 5 completed missions
+    if ((p.totalMissionsDone || 0) > 0 && (p.totalMissionsDone || 0) % 5 === 0) {
+      spawnBoss();
+      showToast(`👿 ${p.bossName || 'Um boss'} apareceu!`, 'hp');
+    }
+    return;
+  }
+  p.bossHp = Math.max(0, (p.bossHp || 0) - amount);
+  if (p.bossHp <= 0) {
+    p.bossActive = false;
+    p.bossDefeated = (p.bossDefeated || 0) + 1;
+    const reward = 50 + (p.bossDefeated || 0) * 20;
+    addCoins(reward);
+    addXP(reward * 2);
+    showToast(`🏆 ${p.bossName} derrotado! +${reward} moedas!`, 'gold');
+  }
+  Store.set('player', p);
+  State.changed('player');
+}
 function viewClans() { cloudPlaceholder('Clãs', 'flag'); }
 function viewRankings() {
   const LIGA_NAMES = ['Ferro', 'Bronze', 'Prata', 'Ouro', 'Diamante'];
