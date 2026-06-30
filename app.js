@@ -152,7 +152,7 @@ const DEFAULTS = {
     { id:'loot_gold', name:'👑 Baú de Ouro', desc:'Sorteio com itens épicos', cost: 100 },
   ], purchases: [] },
   agua: { copos: 0, meta: 8, historico: {} },
-  settings: { theme: 'violeta', hardcoreFail: false, hardcoreHp: false, dailyXpGoal: 100, maxDailyXp: 500, notifyEnabled: true, notifyHour: 20, notifyMin: 0 },
+  settings: { theme: 'violeta', hardcoreFail: false, hardcoreHp: false, dailyXpGoal: 100, maxDailyXp: 500, notifyEnabled: true, notifyHour: 20, notifyMin: 0, soundEnabled: true, gentleMode: false },
   achievements: { claimed: [] },
   lastDailyReset: null,
 };
@@ -298,6 +298,30 @@ function closeModal() {
   document.getElementById('modal-root').innerHTML = '';
 }
 
+// ——— Audio system ———
+function playSoundIfEnabled(type) {
+  const s = Store.get('settings') || {};
+  if (s.soundEnabled !== false) playSound(type);
+}
+function playSound(type) {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    gain.gain.value = 0.08;
+    switch (type) {
+      case 'xp': osc.frequency.value = 600; osc.type = 'sine'; gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + .15); osc.start(); osc.stop(ctx.currentTime + .15); break;
+      case 'coin': osc.frequency.value = 800; osc.type = 'triangle'; gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + .1); osc.start(); osc.stop(ctx.currentTime + .1); break;
+      case 'levelup': osc.frequency.value = 400; osc.type = 'sine'; gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + .4); osc.start(); osc.stop(ctx.currentTime + .4); break;
+      case 'damage': osc.frequency.value = 200; osc.type = 'sawtooth'; gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + .2); osc.start(); osc.stop(ctx.currentTime + .2); break;
+      case 'complete': osc.frequency.value = 523; osc.type = 'sine'; gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + .25); osc.start(); osc.stop(ctx.currentTime + .25); setTimeout(() => { const o2=ctx.createOscillator(); o2.connect(ctx.destination); o2.frequency.value=659; o2.type='sine'; o2.start(); o2.stop(ctx.currentTime+.25); },100); break;
+      default: osc.start(); osc.stop(ctx.currentTime + .1);
+    }
+  } catch(e) { /* silent */ }
+}
+
 function confirmModal(msg, cb) {
   openModal(`
     <div class="modal-head"><div class="mi">${icon('alert-circle')||'⚠️'}</div><h2>Confirmar</h2><button class="x">${icon('x')}</button></div>
@@ -311,6 +335,7 @@ function confirmModal(msg, cb) {
 }
 
 function showLevelUp(level, title) {
+  playSoundIfEnabled('levelup');
   const el = document.createElement('div');
   el.className = 'levelup';
   el.innerHTML = `<div class="burst"><div class="big">NÍVEL ${level}!<br>${title}</div></div>`;
@@ -344,6 +369,7 @@ function getLevelConfig(level) {
 
 function addXP(amount, skillType) {
   const p = Store.get('player');
+  playSoundIfEnabled('xp');
   const settings = Store.get('settings') || DEFAULTS.settings;
   const goal = settings.dailyXpGoal || 100;
   const maxDaily = settings.maxDailyXp || 500;
@@ -394,6 +420,7 @@ function addXP(amount, skillType) {
 function addCoins(amount) {
   const p = Store.get('player');
   p.coins += amount;
+  if (amount > 0) playSoundIfEnabled('coin');
   Store.set('player', p);
   State.changed('player');
   checkAchievements();
@@ -417,7 +444,10 @@ function healHp(amount) {
 
 function damageHp(amount) {
   const p = Store.get('player');
+  const settings = Store.get('settings') || {};
+  if (settings.gentleMode) { p.hp = Math.max(1, p.hp - Math.floor(amount/2)); playSoundIfEnabled('damage'); return; }
   p.hp = Math.max(0, p.hp - amount);
+  playSoundIfEnabled('damage');
   Store.set('player', p);
   State.changed('player');
 }
@@ -835,6 +865,7 @@ function toggleMission(id) {
     pAttr.atributos[attr] = (pAttr.atributos[attr] || 0) + 1;
     Store.set('player', pAttr);
   }
+  playSoundIfEnabled('complete');
   showToast(`✅ ${m.title} concluída! +${m.reward.xp}XP +${m.reward.coins} moedas`, 'gold');
   // Check for loot box drop (25% chance)
   if (Math.random() < 0.25) {
