@@ -129,6 +129,7 @@ const DEFAULTS = {
     streakFreeze: 0,
     dailyXp: 0,
     metaBatidaHoje: false,
+    onboardingDone: false,
   },
   missions: [],
   habits: [],
@@ -143,7 +144,7 @@ const DEFAULTS = {
     { id:'streak_freeze', name:'❄️ Congelar Ofensiva', desc:'Protege sua ofensiva por 1 dia', cost: 30 },
   ], purchases: [] },
   agua: { copos: 0, meta: 8, historico: {} },
-  settings: { theme: 'violeta', hardcoreFail: false, hardcoreHp: false, dailyXpGoal: 100 },
+  settings: { theme: 'violeta', hardcoreFail: false, hardcoreHp: false, dailyXpGoal: 100, maxDailyXp: 500 },
   achievements: { claimed: [] },
   lastDailyReset: null,
 };
@@ -321,8 +322,17 @@ function addXP(amount, skillType) {
   const p = Store.get('player');
   const settings = Store.get('settings') || DEFAULTS.settings;
   const goal = settings.dailyXpGoal || 100;
-  p.xp += amount;
-  p.dailyXp = (p.dailyXp || 0) + amount;
+  const maxDaily = settings.maxDailyXp || 500;
+
+  // Cap daily XP gain to prevent abuse
+  const currentDaily = p.dailyXp || 0;
+  const allowed = Math.max(0, maxDaily - currentDaily);
+  const actualAmount = Math.min(amount, allowed);
+  if (actualAmount <= 0 && amount > 0) return; // Hit daily cap
+  if (actualAmount < amount) showToast(`Limite diário de XP atingido (${maxDaily}XP).`, '');
+
+  p.xp += actualAmount;
+  p.dailyXp = currentDaily + actualAmount;
   let leveledUp = false;
 
   // Check diaria meta
@@ -342,11 +352,11 @@ function addXP(amount, skillType) {
     leveledUp = true;
   }
   if (skillType && p.skills[skillType] !== undefined) {
-    p.skills[skillType] = (p.skills[skillType] || 0) + Math.floor(amount / 10);
+    p.skills[skillType] = (p.skills[skillType] || 0) + Math.floor(actualAmount / 10);
   }
   else if (skillType && p.customSkills) {
     const cs = p.customSkills.find(s => s.id === skillType);
-    if (cs) cs.xp = (cs.xp || 0) + Math.floor(amount / 10);
+    if (cs) cs.xp = (cs.xp || 0) + Math.floor(actualAmount / 10);
   }
   Store.set('player', p);
   State.changed('player');
@@ -576,39 +586,57 @@ function viewCampo() {
   const filter = sessionStorage.getItem('campoFilter') || 'all';
   let list = [...missions].sort((a,b) => a.done===b.done?0:(a.done?1:-1));
 
-  if (filter === 'pending') list = list.filter(m => !m.done && m.date === todayStr);
-  else if (filter === 'done') list = list.filter(m => m.done);
+  // Filter by type
+  if (filter === 'mission') list = list.filter(m => (m.type || (m.isDaily ? 'daily' : 'mission')) === 'mission');
+  else if (filter === 'daily') list = list.filter(m => (m.type || (m.isDaily ? 'daily' : 'mission')) === 'daily');
+  else if (filter === 'habit') list = list.filter(m => (m.type || 'mission') === 'habit');
+
+  // Filter by startDate: only show if startDate is null or <= today
+  list = list.filter(m => !m.startDate || m.startDate <= todayStr);
 
   const html = `
     <div class="between" style="margin-bottom:16px;">
       <div class="tabs">
-        ${['all','pending','done'].map(f =>
-          `<button class="${filter===f?'active':''}" data-action="filter" data-filter="${f}">${f==='all'?'Todas':f==='pending'?'Pendentes':'Concluídas'}</button>`
+        ${[
+          { key: 'all', label: 'Todas' },
+          { key: 'mission', label: 'Missões' },
+          { key: 'daily', label: 'Diárias' },
+          { key: 'habit', label: 'Hábitos' },
+        ].map(f =>
+          `<button class="${filter===f.key?'active':''}" data-action="filter" data-filter="${f.key}">${f.label}</button>`
         ).join('')}
       </div>
       <button class="btn primary" data-action="new-mission">${icon('plus')} Nova</button>
     </div>
     <div class="list">
       ${list.length ? list.map(m => {
+        const mType = m.type || (m.isDaily ? 'daily' : 'mission');
         const r = m.reward || calcReward(m.difficulty);
         const cls = m.done ? 'mission done' : 'mission' + (m.skill && SKILL_CLASSES[m.skill] ? ' '+SKILL_CLASSES[m.skill] : '');
+        let badges = `<span class="tag">${DIFFICULTIES[m.difficulty]?.label||'?'}</span>`;
+        if (mType === 'daily') badges += '<span class="tag b">diária</span>';
+        if (mType === 'habit') badges += '<span class="tag s">hábito</span>';
+        // Date badges
+        if (m.dueDate && !m.done) {
+          if (m.dueDate === todayStr) badges += '<span class="tag gold">📅 Vence hoje</span>';
+          else if (m.dueDate < todayStr) badges += '<span class="tag hp">⚠️ Atrasada</span>';
+        }
         return `<div class="${cls}" data-id="${m.id}">
           <div class="check" data-action="toggle-mission" data-id="${m.id}">${m.done?icon('check'):''}</div>
           <div class="m-body">
             <div class="m-title">${m.title}</div>
             <div class="m-meta">
-              <span class="tag">${DIFFICULTIES[m.difficulty]?.label||'?'}</span>
+              ${badges}
               ${m.skill?`<span class="tag v">${SKILL_NAMES[m.skill]||m.skill}</span>`:''}
-              ${m.isDaily?'<span class="tag b">diária</span>':''}
             </div>
           </div>
-          <div class="m-reward"><span class="xp">+${r.xp}XP</span><span class="co">+${r.coins}</span></div>
+          <div class="m-reward"><span class="xp">+${r.xp}XP</span>${r.coins > 0 ? `<span class="co">+${r.coins}</span>` : ''}</div>
           <div class="m-actions">
             <button class="icon-btn" data-action="edit-mission" data-id="${m.id}">${icon('edit')}</button>
             <button class="icon-btn" data-action="delete-mission" data-id="${m.id}">${icon('trash')}</button>
           </div>
         </div>`;
-      }).join('') : `<div class="center-empty"><div class="big">${icon('target')}</div><p>Nenhuma missão ${filter==='pending'?'pendente':filter==='done'?'concluída':''}.</p></div>`}
+      }).join('') : `<div class="center-empty"><div class="big">${icon('target')}</div><p>Nenhuma missão ${filter==='all'?'':filter==='mission'?'do tipo missão':filter==='daily'?'diária':filter==='habit'?'do tipo hábito':''}.</p></div>`}
     </div>`;
 
   document.getElementById('view').innerHTML = html;
@@ -629,8 +657,19 @@ function missionModal(id) {
   const isEdit = !!m;
   const r = m ? calcReward(m.difficulty) : calcReward('facil');
 
+  // Determine type from existing mission (backward compatibility)
+  const missionType = m ? (m.type || (m.isDaily ? 'daily' : 'mission')) : 'mission';
+  const todayStr = today();
+
   openModal(`
     <div class="modal-head"><div class="mi">${icon('target')}</div><h2>${isEdit?'Editar':'Nova'} Missão</h2><button class="x">${icon('x')}</button></div>
+    <div class="field"><label>Tipo</label>
+      <div class="tabs" id="mission-type-tabs">
+        <button class="${missionType==='mission'?'active':''}" data-type="mission">Missão</button>
+        <button class="${missionType==='daily'?'active':''}" data-type="daily">Diária</button>
+        <button class="${missionType==='habit'?'active':''}" data-type="habit">Hábito</button>
+      </div>
+    </div>
     <div class="field"><label>Título</label><input class="input" id="f-title" value="${isEdit?escHtml(m.title):''}" placeholder="Ex: Estudar React"></div>
     <div class="field"><label>Descrição (opcional)</label><textarea class="textarea" id="f-desc" placeholder="Detalhes...">${isEdit?escHtml(m.description||''):''}</textarea></div>
     <div class="two">
@@ -645,20 +684,38 @@ function missionModal(id) {
           return opts.join('');
         })()}
       </select></div>
-      <div class="field"><label><input type="checkbox" id="f-daily" ${isEdit&&m.isDaily?'checked':''}> Missão diária</label></div>
-    </div>
-    <div class="field"><label>Dificuldade</label>
-      <div class="diff-grid" id="diff-grid">
-        ${Object.entries(DIFFICULTIES).map(([k,v]) => `
-          <div class="diff ${isEdit&&m.difficulty===k?'active':k==='facil'&&!isEdit?'active':''}" data-value="${k}">
-            <div class="dname">${v.label}</div>
-            <div class="dxp">+${v.xp}XP</div>
-            <div class="dco">+${v.coins}</div>
-          </div>`).join('')}
+      <div class="field"><label>Dificuldade</label>
+        <div class="diff-grid" id="diff-grid">
+          ${Object.entries(DIFFICULTIES).map(([k,v]) => `
+            <div class="diff ${isEdit&&m.difficulty===k?'active':k==='facil'&&!isEdit?'active':''}" data-value="${k}">
+              <div class="dname">${v.label}</div>
+              <div class="dxp">+${v.xp}XP</div>
+              <div class="dco">+${v.coins}</div>
+            </div>`).join('')}
+        </div>
       </div>
+    </div>
+    <div class="two" id="mission-date-fields">
+      <div class="field"><label>Data de início (opcional)</label><input class="input" id="f-start" type="date" value="${isEdit&&m.startDate?m.startDate:''}"></div>
+      <div class="field"><label>Data de vencimento (opcional)</label><input class="input" id="f-due" type="date" value="${isEdit&&m.dueDate?m.dueDate:''}"></div>
+    </div>
+    <div class="field" id="mission-habit-note" style="${missionType==='habit'?'':'display:none;'}">
+      <p class="muted" style="font-size:13px;">${icon('check')} Hábitos não dão moedas e podem ser concluídos múltiplas vezes.</p>
     </div>
     <button class="btn primary full" data-action="save-mission" data-id="${isEdit?id:''}">${icon('check')} ${isEdit?'Salvar':'Criar Missão'}</button>
   `, false);
+
+  // Type selector behavior
+  document.getElementById('mission-type-tabs')?.addEventListener('click', e => {
+    const btn = e.target.closest('button[data-type]');
+    if (!btn) return;
+    document.querySelectorAll('#mission-type-tabs button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    // Show/hide date fields and habit note
+    const type = btn.dataset.type;
+    document.getElementById('mission-date-fields').style.display = type === 'habit' ? 'none' : '';
+    document.getElementById('mission-habit-note').style.display = type === 'habit' ? '' : 'none';
+  });
 
   document.getElementById('diff-grid')?.addEventListener('click', e => {
     const diff = e.target.closest('.diff');
@@ -672,22 +729,31 @@ function missionModal(id) {
     if (!title) return showToast('Digite um título para a missão.', 'hp');
     const desc = document.getElementById('f-desc')?.value.trim() || '';
     const skill = document.getElementById('f-skill')?.value || 'destreza';
-    const isDaily = document.getElementById('f-daily')?.checked || false;
+    const typeBtn = document.querySelector('#mission-type-tabs .active');
+    const type = typeBtn ? typeBtn.dataset.type : 'mission';
+    const isDaily = type === 'daily';
     const diffEl = document.querySelector('.diff.active');
     const difficulty = diffEl ? diffEl.dataset.value : 'facil';
     const reward = calcReward(difficulty);
+    const startDate = document.getElementById('f-start')?.value || null;
+    const dueDate = document.getElementById('f-due')?.value || null;
+
+    // Habits give no coins
+    if (type === 'habit') {
+      reward.coins = 0;
+    }
 
     if (isEdit) {
       const missions = Store.get('missions') || [];
       const idx = missions.findIndex(x => x.id === id);
       if (idx >= 0) {
-        missions[idx] = { ...missions[idx], title, description: desc, skill, difficulty, isDaily, reward };
+        missions[idx] = { ...missions[idx], title, description: desc, skill, difficulty, type, isDaily, reward, startDate, dueDate };
         Store.set('missions', missions);
         showToast('Missão atualizada!', 'success');
       }
     } else {
       const missions = Store.get('missions') || [];
-      missions.push({ id:uid(), title, description:desc, skill, difficulty, done:false, date:today(), createdAt:new Date().toISOString(), completedAt:null, isDaily, reward });
+      missions.push({ id: uid(), title, description: desc, skill, difficulty, done: false, date: todayStr, createdAt: new Date().toISOString(), completedAt: null, isDaily, reward, type, startDate, dueDate });
       Store.set('missions', missions);
       showToast(`Missão criada! (+${reward.xp}XP quando concluir)`, '');
     }
@@ -700,6 +766,21 @@ function toggleMission(id) {
   const missions = Store.get('missions') || [];
   const m = missions.find(x => x.id === id);
   if (!m) return;
+  const mType = m.type || (m.isDaily ? 'daily' : 'mission');
+
+  // Habits are repeatable: grant XP but don't mark as done
+  if (mType === 'habit') {
+    const r = m.reward || calcReward(m.difficulty);
+    const p = Store.get('player');
+    p.totalHabitsDone = (p.totalHabitsDone || 0) + 1;
+    Store.set('player', p);
+    addXP(r.xp, m.skill);
+    // Habits grant no coins
+    showToast(`✅ ${m.title} concluído! +${r.xp}XP`, 'gold');
+    viewCampo();
+    return;
+  }
+
   if (m.done) return showToast('Missão já concluída.', '');
 
   m.done = true;
@@ -1675,6 +1756,185 @@ function noteModal(id) {
 
 function escHtml(s) { if (!s) return ''; return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
+// ============================================================
+// 11b. ONBOARDING GAMIFICADO
+// ============================================================
+const ONBOARDING_AVATARS = ['😺','🦊','🐉','🦅','🐺'];
+
+function showOnboarding() {
+  let step = 1;
+  const totalSteps = 4;
+
+  function renderStep() {
+    let html = '';
+    if (step === 1) {
+      html = `
+        <div class="onboarding-container">
+          <div class="onboarding-progress">${Array.from({length:totalSteps},(_,i)=>`<div class="odot ${i<step?'done':''} ${i===step-1?'active':''}"></div>`).join('')}</div>
+          <h2 class="onboarding-title">Bem-vindo ao Z&Ecaron;NITE!</h2>
+          <p style="color:var(--muted);margin-bottom:16px;">Quem &eacute; voc&ecirc;, aventureiro?</p>
+          <div style="margin-bottom:16px;">
+            <label style="font-size:13px;color:var(--muted);display:block;margin-bottom:6px;">Escolha seu avatar</label>
+            <div class="onboarding-avatars">
+              ${ONBOARDING_AVATARS.map(a => `<div class="oavatar" data-avatar="${a}">${a}</div>`).join('')}
+            </div>
+          </div>
+          <div class="field"><label>Seu nome</label><input class="input" id="onb-name" value="Aventureiro" placeholder="Digite seu nome"></div>
+          <button class="btn primary full" data-action="onb-next">Pr&oacute;ximo</button>
+        </div>`;
+    } else if (step === 2) {
+      html = `
+        <div class="onboarding-container">
+          <div class="onboarding-progress">${Array.from({length:totalSteps},(_,i)=>`<div class="odot ${i<step?'done':''} ${i===step-1?'active':''}"></div>`).join('')}</div>
+          <h2 class="onboarding-title">Suas Habilidades</h2>
+          <p style="color:var(--muted);margin-bottom:16px;">Escolha pelo menos 2 habilidades para come&ccedil;ar (voc&ecirc; pode criar uma customizada tamb&eacute;m).</p>
+          <div style="margin-bottom:12px;">
+            ${Object.entries(SKILL_NAMES).map(([k,v]) => `
+              <label class="onb-skill" data-skill="${k}">
+                <input type="checkbox" checked> <span>${icon(SKILL_ICONS[k])} ${v}</span>
+              </label>`).join('')}
+          </div>
+          <div style="margin-bottom:16px;">
+            <button class="btn ghost sm" data-action="onb-custom-skill">${icon('plus')} Criar skill customizada</button>
+            <div id="onb-custom-area" style="display:none;margin-top:8px;">
+              <div class="two">
+                <div class="field"><input class="input" id="onb-cs-name" placeholder="Nome da skill"></div>
+                <div class="field"><input class="input" id="onb-cs-icon" placeholder="Emoji" value="📌" style="font-size:18px;max-width:70px;"></div>
+              </div>
+            </div>
+          </div>
+          <button class="btn primary full" data-action="onb-next">Pr&oacute;ximo</button>
+        </div>`;
+    } else if (step === 3) {
+      html = `
+        <div class="onboarding-container">
+          <div class="onboarding-progress">${Array.from({length:totalSteps},(_,i)=>`<div class="odot ${i<step?'done':''} ${i===step-1?'active':''}"></div>`).join('')}</div>
+          <h2 class="onboarding-title">Sua Primeira Miss&atilde;o</h2>
+          <p style="color:var(--muted);margin-bottom:16px;">Crie uma miss&atilde;o simples para come&ccedil;ar sua jornada.</p>
+          <div class="field"><label>T&iacute;tulo</label><input class="input" id="onb-m-title" placeholder="Ex: Estudar 30 minutos"></div>
+          <div class="field"><label>Dificuldade</label>
+            <div class="diff-grid" id="onb-diff-grid">
+              ${Object.entries(DIFFICULTIES).map(([k,v]) => `
+                <div class="diff ${k==='facil'?'active':''}" data-value="${k}">
+                  <div class="dname">${v.label}</div>
+                  <div class="dxp">+${v.xp}XP</div>
+                  <div class="dco">+${v.coins}</div>
+                </div>`).join('')}
+            </div>
+          </div>
+          <button class="btn primary full" data-action="onb-next">Pr&oacute;ximo</button>
+        </div>`;
+    } else if (step === 4) {
+      html = `
+        <div class="onboarding-container">
+          <div class="onboarding-progress">${Array.from({length:totalSteps},(_,i)=>`<div class="odot ${i<step?'done':''} ${i===step-1?'active':''}"></div>`).join('')}</div>
+          <h2 class="onboarding-title">Sua Jornada Come&ccedil;a!</h2>
+          <p style="color:var(--muted);margin-bottom:16px;">Veja como o jogo funciona:</p>
+          <div class="grid g-2" style="margin-bottom:16px;">
+            <div class="card" style="padding:14px;text-align:center;"><div style="font-size:28px;font-weight:800;color:var(--primary-bright);">XP</div><div class="muted" style="font-size:12px;">Complete miss&otilde;es para ganhar experi&ecirc;ncia e subir de n&iacute;vel.</div></div>
+            <div class="card" style="padding:14px;text-align:center;"><div style="font-size:28px;font-weight:800;color:var(--gold);">${icon('coin')}</div><div class="muted" style="font-size:12px;">Moedas para comprar itens no Mercado.</div></div>
+            <div class="card" style="padding:14px;text-align:center;"><div style="font-size:28px;font-weight:800;color:var(--hp);">HP</div><div class="muted" style="font-size:12px;">N&atilde;o deixe suas miss&otilde;es acumularem ou perder&aacute; vida!</div></div>
+            <div class="card" style="padding:14px;text-align:center;"><div style="font-size:28px;font-weight:800;color:var(--energy);">${icon('activity')}</div><div class="muted" style="font-size:12px;">Mantenha a ofensiva de dias consecutivos para ganhar b&ocirc;nus.</div></div>
+          </div>
+          <div style="background:var(--surface-2);border-radius:12px;padding:14px;margin-bottom:16px;text-align:center;">
+            <div style="font-size:14px;color:var(--muted);">Recompensa de boas-vindas:</div>
+            <div style="font-size:20px;font-weight:800;color:var(--gold);">+50 XP &middot; +10 moedas</div>
+          </div>
+          <button class="btn primary full" data-action="onb-finish">${icon('check')} Come&ccedil;ar Jornada!</button>
+        </div>`;
+    }
+
+    openModal(html, true);
+
+    // Bind step-specific events
+    if (step === 1) {
+      document.querySelectorAll('.oavatar').forEach(el => {
+        el.addEventListener('click', () => {
+          document.querySelectorAll('.oavatar').forEach(a => a.classList.remove('selected'));
+          el.classList.add('selected');
+        });
+      });
+      // Default select first avatar
+      const first = document.querySelector('.oavatar');
+      if (first) first.classList.add('selected');
+    }
+
+    if (step === 2) {
+      document.querySelector('[data-action=onb-custom-skill]')?.addEventListener('click', () => {
+        const area = document.getElementById('onb-custom-area');
+        area.style.display = area.style.display === 'none' ? 'block' : 'none';
+      });
+    }
+
+    if (step === 3) {
+      document.getElementById('onb-diff-grid')?.addEventListener('click', e => {
+        const diff = e.target.closest('.diff');
+        if (!diff) return;
+        document.querySelectorAll('.diff').forEach(d => d.classList.remove('active'));
+        diff.classList.add('active');
+      });
+    }
+
+    // Bind next/finish buttons
+    document.querySelector('[data-action=onb-next]')?.addEventListener('click', () => {
+      // Validate step 1
+      if (step === 1) {
+        const name = document.getElementById('onb-name')?.value.trim() || 'Aventureiro';
+        const avatarEl = document.querySelector('.oavatar.selected');
+        const avatar = avatarEl ? avatarEl.dataset.avatar : '😺';
+        const p = Store.get('player');
+        p.name = name;
+        p.avatar = avatar;
+        Store.set('player', p);
+      }
+      // Validate step 2
+      if (step === 2) {
+        const checked = document.querySelectorAll('.onb-skill input:checked');
+        if (checked.length < 2) return showToast('Escolha pelo menos 2 habilidades.', 'hp');
+        const p = Store.get('player');
+        checked.forEach(el => {
+          const skillKey = el.closest('.onb-skill')?.dataset.skill;
+          if (skillKey && p.skills[skillKey] !== undefined) p.skills[skillKey] = 10;
+        });
+        // Save custom skill if provided
+        const csName = document.getElementById('onb-cs-name')?.value.trim();
+        const csIcon = document.getElementById('onb-cs-icon')?.value.trim() || '📌';
+        if (csName) {
+          if (!p.customSkills) p.customSkills = [];
+          p.customSkills.push({ id: uid(), name: csName, icon: csIcon, xp: 0 });
+        }
+        Store.set('player', p);
+      }
+      // Validate step 3
+      if (step === 3) {
+        const title = document.getElementById('onb-m-title')?.value.trim();
+        if (!title) return showToast('Digite um título para a missão.', 'hp');
+        const diffEl = document.querySelector('.diff.active');
+        const difficulty = diffEl ? diffEl.dataset.value : 'facil';
+        const reward = calcReward(difficulty);
+        const missions = Store.get('missions') || [];
+        missions.push({ id: uid(), title, description: '', skill: '', difficulty, done: false, date: today(), createdAt: new Date().toISOString(), completedAt: null, isDaily: false, reward, type: 'mission', startDate: null, dueDate: null });
+        Store.set('missions', missions);
+      }
+      step++;
+      renderStep();
+    });
+
+    document.querySelector('[data-action=onb-finish]')?.addEventListener('click', () => {
+      const p = Store.get('player');
+      p.onboardingDone = true;
+      addXP(50, '');
+      addCoins(10);
+      Store.set('player', p);
+      closeModal();
+      showToast('🎉 Boas-vindas! +50XP +10 moedas!', 'gold');
+      renderAll();
+    });
+  }
+
+  renderStep();
+}
+
 // ——— VIEW: Conquistas ———
 function viewConquistas() {
   const p = Store.get('player');
@@ -1908,18 +2168,32 @@ function checkDailyReset() {
 
   let hpLost = 0;
 
-  // Auto-fail incomplete missions from yesterday
+  // Auto-fail incomplete missions that are past due
   if (settings.hardcoreFail) {
     missions.forEach(m => {
-      if (!m.done && m.date && m.date < todayStr && !m.isDaily) {
-        if (settings.hardcoreHp) hpLost += 10;
+      const mType = m.type || (m.isDaily ? 'daily' : 'mission');
+      // Only damage missions with past dueDate (or missions without type/isDaily from old data with m.date < today)
+      if (!m.done && mType !== 'habit') {
+        if (m.dueDate && m.dueDate < todayStr) {
+          if (settings.hardcoreHp) hpLost += 10;
+        } else if (!m.type && !m.isDaily && m.date && m.date < todayStr) {
+          // Legacy: old missions without type/isDaily, check m.date
+          if (settings.hardcoreHp) hpLost += 10;
+        }
       }
     });
   }
 
-  // Reset daily missions
+  // Reset daily missions (both new type='daily' and legacy isDaily)
   missions.forEach(m => {
-    if (m.isDaily && m.done && m.date !== todayStr) {
+    const mType = m.type || (m.isDaily ? 'daily' : 'mission');
+    if (mType === 'daily') {
+      if (m.done && m.date !== todayStr) {
+        m.done = false;
+        m.date = todayStr;
+      }
+      // Also reset habits with done=true from previous day's legacy behavior
+    } else if (m.isDaily && m.done && m.date !== todayStr) {
       m.done = false;
       m.date = todayStr;
     }
@@ -2012,6 +2286,12 @@ function init() {
 
   // Run daily reset
   checkDailyReset();
+
+  // Show onboarding for new players
+  const p = Store.get('player');
+  if (!p.onboardingDone) {
+    setTimeout(showOnboarding, 300);
+  }
 
   // Check achievements on load
   checkAchievements();

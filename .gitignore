@@ -12,3 +12,6 @@ desktop.ini
 # Temp
 *.log
 *.tmp
+node_modules/
+.claude/worktrees/
+.claude/scheduled_tasks.json
