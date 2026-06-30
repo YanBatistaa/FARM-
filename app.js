@@ -132,7 +132,7 @@ const DEFAULTS = {
     streakFreeze: 0, dailyCombo: 0, bestCombo: 0,
     dailyXp: 0,
     metaBatidaHoje: false,
-    onboardingDone: false,
+    onboardingDone: false, gameOver: false, deaths: 0, bestStreak: 0,
     bossHp: 0, bossMaxHp: 100, bossName: '', bossLore: '', bossDefeated: 0, bossActive: false,
     pet: { name: '', stage: 0, xp: 0, evolutions: 0, },
     capa: 0,
@@ -367,7 +367,10 @@ function applyTheme(name) {
 function getLevelConfig(level) {
   const found = LEVELS.find(l => l.level === level);
   if (found) return found;
-  return { level, xpNeeded: level * 200 + 1200, title: 'Lenda' };
+  const xpNeeded = 200 + level * 150;
+  const TITLES_EXTENDED = ['Lenda','Imortal','Divino','Supremo','Absoluto','Eterno','Cosmico','Transcendente','Onipotente','Zen'];
+  const tIdx = Math.floor((level - 11) / 5);
+  return { level, xpNeeded, title: TITLES_EXTENDED[tIdx] || 'Mestre Supremo' };
 }
 
 function addXP(amount, skillType) {
@@ -450,9 +453,24 @@ function damageHp(amount) {
   const settings = Store.get('settings') || {};
   if (settings.gentleMode) { p.hp = Math.max(1, p.hp - Math.floor(amount/2)); playSoundIfEnabled('damage'); return; }
   p.hp = Math.max(0, p.hp - amount);
-  playSoundIfEnabled('damage');
   Store.set('player', p);
   State.changed('player');
+  playSoundIfEnabled('damage');
+  if (p.hp <= 0 && !p.gameOver) {
+    p.gameOver = true;
+    p.deaths = (p.deaths || 0) + 1;
+    Store.set('player', p); State.changed('player');
+    showToast('💀 Você foi derrotado!', 'hp');
+    renderAll();
+  }
+}
+function revivePlayer() {
+  const p = Store.get('player');
+  const cost = 30 + (p.deaths || 0) * 10;
+  if (p.coins < cost) { showToast('💰 Faltam ' + (cost - p.coins) + ' moedas para reviver.', 'hp'); return false; }
+  p.coins -= cost; p.hp = Math.round(p.maxHp * 0.5); p.gameOver = false;
+  Store.set('player', p); State.changed('player');
+  showToast('💫 Reviveu!', 'gold'); renderAll(); return true;
 }
 
 function calcReward(difficulty) {
@@ -591,7 +609,12 @@ function bindActions(container, handlers) {
 }
 
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
-function today() { return new Date().toISOString().slice(0,10); }
+function today() {
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    return new Intl.DateTimeFormat('en-CA', { timeZone: tz, year:'numeric', month:'2-digit', day:'2-digit' }).format(new Date());
+  } catch { return new Date().toISOString().slice(0,10); }
+}
 
 // ============================================================
 // 11. VIEWS
