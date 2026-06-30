@@ -1457,9 +1457,16 @@ function viewCaverna() {
   const mins = Math.floor(pomodoroState.timeLeft / 60);
   const secs = pomodoroState.timeLeft % 60;
 
+  // Tree growth visual
+  const treeStage = Math.min(4, Math.floor((100-pct) / 25));
+  const trees = ['🌱','🌿','🌳','🌲','🌲'];
+  const tree = trees[treeStage] || '🌲';
+  const treeSize = 20 + pct * 0.8;
+
   document.getElementById('view').innerHTML = `
     <div class="grid g-2">
       <div class="card" style="text-align:center;padding:30px;">
+        <div style="font-size:${treeSize}px;margin-bottom:8px;transition:font-size .5s ease;">${tree}</div>
         <svg class="ring" width="160" height="160" viewBox="0 0 100 100">
           <circle class="track" cx="50" cy="50" r="40" stroke-width="9"/>
           <circle class="ind" cx="50" cy="50" r="40" stroke-width="9" stroke-dasharray="${circumference}" stroke-dashoffset="${offset}"/>
