@@ -2269,7 +2269,101 @@ function viewConfiguracoes() {
 // ——— CLOUD PLACEHOLDER VIEWS ———
 function viewSocial() { cloudPlaceholder('Social', 'users'); }
 function viewClans() { cloudPlaceholder('Clãs', 'flag'); }
-function viewRankings() { cloudPlaceholder('Rankings', 'bar-chart'); }
+function viewRankings() {
+  const LIGA_NAMES = ['Ferro', 'Bronze', 'Prata', 'Ouro', 'Diamante'];
+  const BOT_NAMES = ['Alex', 'Bia', 'Cadu', 'Duda', 'Eva', 'Fábio', 'Gabi', 'Hugo', 'Isa', 'Joca'];
+  const hoje = today();
+  const player = Store.get('player');
+
+  // Init liga data
+  let ligaData = Store.get('ligaData');
+  const weekStart = getWeekStart();
+  if (!ligaData || ligaData.weekStart !== weekStart) {
+    const ligaIdx = Math.min(Math.floor((player.level-1)/2), LIGA_NAMES.length-1);
+    // Generate bot players
+    const bots = BOT_NAMES.map(n => ({
+      name: n, xp: Math.floor(Math.random() * 500) + 50,
+      avatar: ['😺','🦊','🐉','🦅','🐺','🐱','🦁','🐸','🦄','🐲'][Math.floor(Math.random()*10)],
+      bot: true,
+    }));
+    ligaData = { weekStart, ligaIdx, players: [
+      { name: player.name, xp: player.dailyXp || 0, avatar: player.avatar || '😺', bot: false },
+      ...bots,
+    ].sort((a,b) => b.xp - a.xp), claimed: false };
+    // Assign player rank
+    ligaData.players.forEach((pl, i) => { pl.rank = i + 1; });
+    Store.set('ligaData', ligaData);
+  }
+
+  // Daily XP sync
+  const myEntry = ligaData.players.find(p => !p.bot);
+  if (myEntry) myEntry.xp = player.dailyXp || 0;
+  ligaData.players.sort((a,b) => b.xp - a.xp);
+  ligaData.players.forEach((pl, i) => { pl.rank = i + 1; });
+
+  // Week remaining
+  const daysLeft = 6 - (new Date().getDay() || 7);
+  const ligaName = LIGA_NAMES[ligaData.ligaIdx] || 'Ferro';
+  const nextLiga = ligaData.ligaIdx < LIGA_NAMES.length-1 ? LIGA_NAMES[ligaData.ligaIdx+1] : null;
+  const myPos = ligaData.players.findIndex(p => !p.bot) + 1;
+  const promoted = myPos <= 3;
+  const relegated = myPos >= ligaData.players.length - 2;
+
+  // Rewards
+  let reward = 0;
+  if (myPos === 1) reward = 50;
+  else if (myPos <= 3) reward = 30;
+  else if (myPos <= 5) reward = 15;
+  const canClaim = daysLeft <= 0 && !ligaData.claimed && reward > 0;
+
+  document.getElementById('view').innerHTML = `
+    <div class="between" style="margin-bottom:16px;">
+      <h2 style="font-weight:800;">${icon('bar-chart')} Liga ${ligaName}</h2>
+      <div class="muted" style="font-size:13px;">${daysLeft > 0 ? '⌛ Faltam ' + daysLeft + ' dia(s)' : '🏁 Semana encerrada'}</div>
+    </div>
+    <div class="card" style="margin-bottom:16px;padding:16px;">
+      <div class="grid g-3" style="text-align:center;">
+        <div><div class="muted" style="font-size:12px;">Sua posição</div><div style="font-size:28px;font-weight:800;">${myPos}º</div></div>
+        <div><div class="muted" style="font-size:12px;">${promoted?'⬆️':'⬇️'} Status</div><div style="font-size:16px;font-weight:700;">${promoted?'Promoção 🔥':relegated?'Rebaixamento ⚠️':'Meio de tabela'}</div></div>
+        <div><div class="muted" style="font-size:12px;">Prêmio</div><div style="font-size:16px;font-weight:700;">${reward > 0 ? `${reward} moedas` : '—'}</div></div>
+      </div>
+    </div>
+    <div class="grid g-1" style="margin-bottom:16px;">
+      ${ligaData.players.map((pl, i) => {
+        const isMe = !pl.bot;
+        return `<div class="card" style="display:flex;align-items:center;gap:12px;padding:10px 14px;${isMe?'border-color:var(--primary);':''}">
+          <span style="font-weight:800;font-size:14px;width:24px;">${pl.rank}º</span>
+          <span style="font-size:20px;">${pl.avatar}</span>
+          <span style="flex:1;font-weight:${isMe?'800':'500'};font-size:14px;">${pl.name}${isMe?' (você)':''}</span>
+          <span class="pill" style="font-size:12px;">${pl.xp} XP</span>
+          ${isMe ? '<span style="font-size:16px;">' + (promoted?'⬆️':relegated?'⬇️':'➡️') + '</span>' : ''}
+        </div>`;
+      }).join('')}
+    </div>
+    ${canClaim ? `<button class="btn gold full" data-action="claim-liga">🏆 Receber ${reward} moedas!</button>` : ''}
+    <div class="card muted" style="font-size:13px;padding:16px;">
+      <strong>Como funciona</strong><br>
+      Top 3 sobem de liga · Últimos 2 caem · Recompensa semanal baseada na posição.
+    </div>`;
+  bindActions(document.getElementById('view'), {
+    'claim-liga'() {
+      if (canClaim) {
+        addCoins(reward);
+        ligaData.claimed = true;
+        Store.set('ligaData', ligaData);
+        showToast(`🏆 +${reward} moedas pela Liga!`, 'gold');
+        viewRankings();
+      }
+    },
+  });
+}
+function getWeekStart() {
+  const d = new Date();
+  const day = d.getDay();
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+  d.setDate(diff);
+  return d.toISOString().slice(0,10);
+}
 function cloudPlaceholder(title, ic) {
   document.getElementById('view').innerHTML = `
     <div class="center-empty">
