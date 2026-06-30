@@ -76,8 +76,6 @@ const ACHIEVEMENTS = [
   { id: 'streak_30',      name: 'Ofensiva Mortal', desc: 'Mantenha 30 dias de ofensiva.',         icon: '💀', reward: 100 },
   { id: 'level_5',        name: 'Mercenário',      desc: 'Alcance o nível 5.',                    icon: '⭐', reward: 40 },
   { id: 'level_10',       name: 'Lenda',           desc: 'Alcance o nível 10.',                   icon: '👑', reward: 100 },
-  { id: 'level_20',       name: 'Imortal',         desc: 'Alcance o nível 20.',                   icon: '🌟', reward: 200 },
-  { id: 'level_50',       name: 'Supremo',         desc: 'Alcance o nível 50.',                   icon: '💫', reward: 500 },
   { id: 'first_coin',     name: 'Primeira Moeda',  desc: 'Ganhe sua primeira moeda.',             icon: '🪙', reward: 5 },
   { id: 'hoard_100',      name: 'Poupeiro',        desc: 'Acumule 100 moedas.',                   icon: '💰', reward: 50 },
 ];
@@ -128,7 +126,9 @@ const DEFAULTS = {
     skills: { destreza: 0, saude: 0, estudos: 0, gestao: 0 },
     customSkills: [],
     totalMissionsDone: 0, totalHabitsDone: 0, totalFocusMinutes: 0,
-    gameOver: false, deaths: 0, bestStreak: 0, streakFreeze: 0,
+    streakFreeze: 0,
+    dailyXp: 0,
+    metaBatidaHoje: false,
   },
   missions: [],
   habits: [],
@@ -140,10 +140,10 @@ const DEFAULTS = {
   notes: [],
   market: { items: [
     { id:'potion', name:'Poção de Cura', desc:'Recupera 30 HP', cost: 15 },
-    { id:'streak_freeze', name:'❄️ Congelar Ofensiva', desc:'Protege seu streak por 1 dia', cost: 30 },
-    { id:'big_potion', name:'🧪 Poção Grande', desc:'Recupera 100% do HP', cost: 40 },
+    { id:'streak_freeze', name:'❄️ Congelar Ofensiva', desc:'Protege sua ofensiva por 1 dia', cost: 30 },
   ], purchases: [] },
-  settings: { theme: 'violeta', hardcoreFail: false, hardcoreHp: false },
+  agua: { copos: 0, meta: 8, historico: {} },
+  settings: { theme: 'violeta', hardcoreFail: false, hardcoreHp: false, dailyXpGoal: 100 },
   achievements: { claimed: [] },
   lastDailyReset: null,
 };
@@ -202,12 +202,14 @@ const State = {
 // 6. ROUTES + ROUTER
 // ============================================================
 const ROUTES = {
+  calendario:{label:'Calendário',icon:'activity',group:'núcleo'},
   dashboard:{label:'Dashboard',icon:'grid',group:'núcleo'},
   campo:{label:'Campo',icon:'target',group:'núcleo'},
   personagem:{label:'Personagem',icon:'user',group:'núcleo'},
   mercado:{label:'Mercado',icon:'cart',group:'núcleo'},
   habitos:{label:'Hábitos',icon:'check',group:'vida'},
   academia:{label:'Academia',icon:'dumbbell',group:'vida'},
+  agua:{label:'Água',icon:'heart',group:'vida'},
   caverna:{label:'Caverna',icon:'clock',group:'vida'},
   financas:{label:'Finanças',icon:'dollar',group:'vida'},
   estudos:{label:'Estudos',icon:'book',group:'cérebro'},
@@ -222,8 +224,8 @@ const ROUTES = {
 };
 
 const NAV_GROUPS = [
-  { label:'Núcleo', routes:['dashboard','campo','personagem','mercado'] },
-  { label:'Vida', routes:['habitos','academia','caverna','financas'] },
+  { label:'Núcleo', routes:['calendario','dashboard','campo','personagem','mercado'] },
+  { label:'Vida', routes:['habitos','academia','agua','caverna','financas'] },
   { label:'Segundo Cérebro', routes:['estudos','midia','notas'] },
   { label:'Mais', routes:['conquistas','temas','configuracoes'] },
   { label:'Nuvem', routes:['social','clans','rankings'] },
@@ -312,20 +314,24 @@ function applyTheme(name) {
 function getLevelConfig(level) {
   const found = LEVELS.find(l => l.level === level);
   if (found) return found;
-  // Dynamic formula for levels beyond the predefined array
-  const xpNeeded = 200 + level * 150;
-  const TITLES_EXTENDED = [
-    'Lenda', 'Imortal', 'Divino', 'Supremo', 'Absoluto',
-    'Eterno', 'Cosmico', 'Transcendente', 'Onipotente', 'Zen',
-  ];
-  const title = TITLES_EXTENDED[Math.floor((level - 11) / 5)] || 'Mestre Supremo';
-  return { level, xpNeeded, title };
+  return { level, xpNeeded: level * 200 + 1200, title: 'Lenda' };
 }
 
 function addXP(amount, skillType) {
   const p = Store.get('player');
+  const settings = Store.get('settings') || DEFAULTS.settings;
+  const goal = settings.dailyXpGoal || 100;
   p.xp += amount;
+  p.dailyXp = (p.dailyXp || 0) + amount;
   let leveledUp = false;
+
+  // Check diaria meta
+  if (p.dailyXp >= goal && !p.metaBatidaHoje) {
+    p.metaBatidaHoje = true;
+    const bonusCoins = 10;
+    p.coins = (p.coins || 0) + bonusCoins;
+    showToast(`🎯 Meta diária batida! +${bonusCoins} moedas!`, 'gold');
+  }
   while (p.xp >= p.xpToNext) {
     const nextLv = p.level + 1;
     const cfg = getLevelConfig(nextLv);
@@ -337,6 +343,10 @@ function addXP(amount, skillType) {
   }
   if (skillType && p.skills[skillType] !== undefined) {
     p.skills[skillType] = (p.skills[skillType] || 0) + Math.floor(amount / 10);
+  }
+  else if (skillType && p.customSkills) {
+    const cs = p.customSkills.find(s => s.id === skillType);
+    if (cs) cs.xp = (cs.xp || 0) + Math.floor(amount / 10);
   }
   Store.set('player', p);
   State.changed('player');
@@ -367,10 +377,6 @@ function spendCoins(amount) {
 function healHp(amount) {
   const p = Store.get('player');
   p.hp = Math.min(p.maxHp, p.hp + amount);
-  if (p.gameOver && p.hp > 0) {
-    p.gameOver = false;
-    showToast('💫 Você reviveu!', 'success');
-  }
   Store.set('player', p);
   State.changed('player');
 }
@@ -380,35 +386,6 @@ function damageHp(amount) {
   p.hp = Math.max(0, p.hp - amount);
   Store.set('player', p);
   State.changed('player');
-  checkDeath();
-}
-
-function checkDeath() {
-  const p = Store.get('player');
-  if (p.hp <= 0 && !p.gameOver) {
-    p.gameOver = true;
-    p.deaths = (p.deaths || 0) + 1;
-    Store.set('player', p);
-    State.changed('player');
-    renderAll();
-  }
-}
-
-function revivePlayer() {
-  const p = Store.get('player');
-  const cost = 30 + (p.deaths || 0) * 10; // aumenta a cada morte
-  if (p.coins < cost) {
-    showToast(`💰 Precisava de ${cost} moedas para reviver. Você tem ${p.coins}.`, 'hp');
-    return false;
-  }
-  p.coins -= cost;
-  p.hp = Math.round(p.maxHp * 0.5); // revive com 50% HP
-  p.gameOver = false;
-  Store.set('player', p);
-  State.changed('player');
-  showToast(`💫 Você reviveu! -${cost} moedas`, 'gold');
-  renderAll();
-  return true;
 }
 
 function calcReward(difficulty) {
@@ -435,8 +412,6 @@ function checkAchievements() {
       case 'streak_30': earned = p.streak >= 30; break;
       case 'level_5': earned = p.level >= 5; break;
       case 'level_10': earned = p.level >= 10; break;
-      case 'level_20': earned = p.level >= 20; break;
-      case 'level_50': earned = p.level >= 50; break;
       case 'first_coin': earned = p.coins >= 1; break;
       case 'hoard_100': earned = p.coins >= 100; break;
     }
@@ -461,9 +436,6 @@ function checkAchievements() {
 function renderSidebar(route) {
   const p = Store.get('player');
   const xpPct = Math.min(100, Math.round((p.xp / p.xpToNext) * 100));
-  const hpPct = Math.round(p.hp / p.maxHp * 100);
-  const hpLow = hpPct <= 25 && hpPct > 0;
-  const gameOverBanner = p.gameOver ? '<div class="go-sidebar-banner" style="text-align:center;padding:8px;background:var(--danger);color:#fff;font-weight:700;font-size:13px;border-radius:8px;margin-bottom:8px;">💀 DERROTADO</div>' : '';
 
   let navHTML = '';
   NAV_GROUPS.forEach(g => {
@@ -481,16 +453,15 @@ function renderSidebar(route) {
       <div class="name">Z<b>ÊNITE</b></div>
     </div>
     <div class="profile">
-      ${gameOverBanner}
       <div class="top">
-        <div class="avatar ${p.gameOver?'go-avatar':''}">${p.avatar||'😺'}<span class="lvl-badge">${p.level}</span></div>
+        <div class="avatar">${p.avatar||'😺'}<span class="lvl-badge">${p.level}</span></div>
         <div class="who"><div class="nm">${p.name}</div><div class="cls">${p.title}</div></div>
       </div>
       <div class="stats-row">
-        <span class="pill hp" style="${hpLow?'animation:pulse-hp 1.5s infinite;':''}">${icon('heart')} ${p.hp}/${p.maxHp}</span>
+        <span class="pill hp">${icon('heart')} ${p.hp}/${p.maxHp}</span>
         <span class="pill en">${icon('zap')} ${p.streak}</span>
         <span class="pill co">${icon('coin')} ${p.coins}</span>
-        ${p.streakFreeze > 0 ? `<span class="pill freeze">❄️ ${p.streakFreeze}</span>` : ''}
+        ${p.streakFreeze > 0 ? `<span class="pill ice">❄️ ${p.streakFreeze}</span>` : ''}
       </div>
       <div class="xpbar-wrap">
         <div class="xpbar-label"><span>XP</span><span>${p.xp}/${p.xpToNext}</span></div>
@@ -508,7 +479,6 @@ function renderSidebar(route) {
   });
   document.querySelector('[data-action=quick-mission]')?.addEventListener('click', () => {
     closeSidebarMobile();
-    if (p.gameOver) return showToast('💀 Você está derrotado! Reviva primeiro.', 'hp');
     Router.navigate('campo');
     setTimeout(() => document.querySelector('[data-action=new-mission]')?.click(), 100);
   });
@@ -523,9 +493,10 @@ function renderTopbar(route) {
   const info = ROUTES[route];
   const subLabels = {
     dashboard:'Visão geral', campo:'Missões e tarefas', personagem:'Seu perfil', mercado:'Gaste suas moedas',
-    habitos:'Rotina diária', academia:'Treinos', caverna:'Foco profundo', financas:'Seu dinheiro',
+    habitos:'Rotina diária', academia:'Treinos', agua:'Hidratação', caverna:'Foco profundo', financas:'Seu dinheiro',
     estudos:'Matérias e materiais', midia:'Filmes, séries e livros', notas:'Anotações rápidas',
     conquistas:'Troféus', temas:'Paletas de cores', configuracoes:'Ajustes',
+    calendario:'Calendário de missões',
     social:'Comunidade', clans:'Grupos', rankings:'Leaderboard',
   };
 
@@ -553,19 +524,7 @@ function bindActions(container, handlers) {
 }
 
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
-function today() { return todayInTz(); }
-
-// Timezone-aware today string
-function todayInTz() {
-  try {
-    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    const now = new Date();
-    const formatter = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }); // en-CA → YYYY-MM-DD
-    return formatter.format(now);
-  } catch {
-    return new Date().toISOString().slice(0,10);
-  }
-}
+function today() { return new Date().toISOString().slice(0,10); }
 
 // ============================================================
 // 11. VIEWS
@@ -574,45 +533,25 @@ function todayInTz() {
 // ——— VIEW: Dashboard ———
 function viewDashboard() {
   const p = Store.get('player');
+  const settings = Store.get('settings') || DEFAULTS.settings;
+  const dailyGoal = settings.dailyXpGoal || 100;
   const missions = Store.get('missions') || [];
-
-  // Game Over screen
-  if (p.gameOver) {
-    const reviveCost = 30 + (p.deaths || 0) * 10;
-    document.getElementById('view').innerHTML = `
-      <div class="center-empty" style="padding:60px 20px;">
-        <div style="font-size:64px;margin-bottom:16px;">💀</div>
-        <h2 style="font-weight:800;font-size:28px;margin-bottom:8px;">Você foi derrotado!</h2>
-        <p class="muted" style="margin-bottom:4px;">${p.name} caiu em batalha no nível ${p.level}.</p>
-        <p class="muted" style="margin-bottom:24px;">Mortes: ${p.deaths} · Streak máximo: ${p.bestStreak||p.streak} dias</p>
-        <div class="card" style="text-align:center;padding:24px;max-width:320px;margin:0 auto;">
-          <div style="font-size:32px;margin-bottom:8px;">${icon('coin')}</div>
-          <div style="font-weight:700;font-size:18px;margin-bottom:4px;">Reviver com ${reviveCost} moedas</div>
-          <div class="muted" style="font-size:13px;margin-bottom:16px;">Você revive com 50% do HP max.</div>
-          <button class="btn gold" data-action="revive" ${p.coins<reviveCost?'disabled':''}>
-            ${p.coins>=reviveCost?'💫 Reviver':'💰 Faltam '+(reviveCost-p.coins)+' moedas'}
-          </button>
-          <div style="margin-top:16px;font-size:13px;" class="muted">Moedas: ${p.coins}</div>
-        </div>
-      </div>`;
-    bindActions(document.getElementById('view'), {
-      'revive': revivePlayer,
-    });
-    return;
-  }
-
   const recent = [...missions].filter(m => m.done).sort((a,b) => (b.completedAt||'')>(a.completedAt||'')?1:-1).slice(0,5);
   const pending = missions.filter(m => !m.done && m.date === today()).length;
-  const hpPct = Math.round(p.hp / p.maxHp * 100);
-  const hpWarning = hpPct <= 25 && hpPct > 0 ? `<div class="alert hp-critical" style="margin-bottom:16px;padding:12px 16px;border-radius:12px;background:var(--hp-dim, rgba(251,106,138,.12));border:1px solid rgba(251,106,138,.25);color:var(--hp);font-weight:600;font-size:14px;">⚠️ HP crítico! Use poções no Mercado para se curar.</div>` : '';
+  const dailyPct = Math.min(100, Math.round(((p.dailyXp||0) / dailyGoal) * 100));
 
   document.getElementById('view').innerHTML = `
-    ${hpWarning}
     <div class="grid g-4" style="margin-bottom:20px;">
       <div class="kpi"><div class="ico">${icon('zap')}</div><div class="val">${p.xp}</div><div class="lbl">XP / ${p.xpToNext}</div></div>
       <div class="kpi gold"><div class="ico">${icon('coin')}</div><div class="val">${p.coins}</div><div class="lbl">Moedas</div></div>
-      <div class="kpi ${hpPct<=25?'hp':''}"><div class="ico">${icon('heart')}</div><div class="val">${p.hp}<span style="font-size:13px;color:var(--muted);">/${p.maxHp}</span></div><div class="lbl">HP · Nv ${p.level}</div></div>
+      <div class="kpi hp"><div class="ico">${icon('heart')}</div><div class="val">${p.hp}</div><div class="lbl">HP · Nv ${p.level}</div></div>
       <div class="kpi green"><div class="ico">${icon('activity')}</div><div class="val">${p.streak}</div><div class="lbl">Ofensiva (dias)</div></div>
+    </div>
+    <div class="card" style="margin-bottom:20px;">
+      <h3><span class="accent"></span>Meta Diária de XP</h3>
+      <div class="kpi" style="margin-bottom:8px;"><div class="ico">${icon('star')}</div><div class="val">${p.dailyXp||0} / ${dailyGoal}</div><div class="lbl">${p.metaBatidaHoje?'Meta batida! 🎯':'XP hoje'}</div></div>
+      <div class="bar" style="height:12px;"><i style="width:${dailyPct}%;background:var(--gold);border-radius:999px;"></i></div>
+      <div class="muted" style="font-size:12px;margin-top:6px;text-align:right;">${dailyPct}%</div>
     </div>
     <div class="grid g-2">
       <div class="card">
@@ -696,8 +635,15 @@ function missionModal(id) {
     <div class="field"><label>Descrição (opcional)</label><textarea class="textarea" id="f-desc" placeholder="Detalhes...">${isEdit?escHtml(m.description||''):''}</textarea></div>
     <div class="two">
       <div class="field"><label>Habilidade</label><select class="input" id="f-skill">
-        ${Object.entries(SKILL_NAMES).map(([k,v]) => `<option value="${k}" ${isEdit&&m.skill===k?'selected':''}>${v}</option>`).join('')}
-        <option value="custom" ${isEdit&&m.skill==='custom'?'selected':''}>Customizada</option>
+        ${(() => {
+          const _p = Store.get('player');
+          let opts = Object.entries(SKILL_NAMES).map(([k,v]) => `<option value="${k}" ${isEdit&&m.skill===k?'selected':''}>${v}</option>`);
+          if (_p.customSkills) _p.customSkills.forEach(cs => {
+            opts.push(`<option value="${cs.id}" ${isEdit&&m.skill===cs.id?'selected':''}>${cs.icon||'📌'} ${cs.name}</option>`);
+          });
+          opts.push(`<option value="" ${isEdit&&!m.skill?'selected':''}>Nenhuma</option>`);
+          return opts.join('');
+        })()}
       </select></div>
       <div class="field"><label><input type="checkbox" id="f-daily" ${isEdit&&m.isDaily?'checked':''}> Missão diária</label></div>
     </div>
@@ -724,8 +670,6 @@ function missionModal(id) {
   document.querySelector('[data-action=save-mission]')?.addEventListener('click', () => {
     const title = document.getElementById('f-title')?.value.trim();
     if (!title) return showToast('Digite um título para a missão.', 'hp');
-    const p = Store.get('player');
-    if (p.gameOver) { closeModal(); return showToast('💀 Você está derrotado! Reviva primeiro.', 'hp'); }
     const desc = document.getElementById('f-desc')?.value.trim() || '';
     const skill = document.getElementById('f-skill')?.value || 'destreza';
     const isDaily = document.getElementById('f-daily')?.checked || false;
@@ -757,11 +701,10 @@ function toggleMission(id) {
   const m = missions.find(x => x.id === id);
   if (!m) return;
   if (m.done) return showToast('Missão já concluída.', '');
-  const p = Store.get('player');
-  if (p.gameOver) return showToast('💀 Você está derrotado! Reviva primeiro.', 'hp');
 
   m.done = true;
   m.completedAt = new Date().toISOString();
+  const p = Store.get('player');
   p.totalMissionsDone = (p.totalMissionsDone || 0) + 1;
   Store.set('missions', missions);
   Store.set('player', p);
@@ -783,12 +726,15 @@ function deleteMission(id) {
 function updateStreak() {
   const p = Store.get('player');
   const last = Store.get('lastDailyReset');
-  const todayStr = today();
-  // Only increment if not already done today
-  if (last !== todayStr) {
-    p.streak++;
-    if (p.streak > (p.bestStreak || 0)) p.bestStreak = p.streak;
+  const yesterday = new Date(Date.now()-86400000).toISOString().slice(0,10);
+
+  if (last === yesterday || last === today()) {
+    // Continue streak
+  } else {
+    p.streak = 0;
   }
+  p.streak++;
+  if (p.streak > p.bestStreak) p.bestStreak = p.streak;
   Store.set('player', p);
   State.changed('player');
 }
@@ -819,7 +765,6 @@ function viewPersonagem() {
         <div style="margin:16px 0;">
           <div class="xpbar-label"><span>XP</span><span>${p.xp}/${p.xpToNext}</span></div>
           <div class="bar"><i style="width:${xpPct}%"></i></div>
-          <div class="muted" style="font-size:12px;margin-top:4px;">${p.xpToNext - p.xp} XP para o próximo nível</div>
         </div>
         <div class="stats-row" style="justify-content:center;">
           <span class="pill hp">${icon('heart')} ${p.hp}/${p.maxHp}</span>
@@ -847,7 +792,281 @@ function viewPersonagem() {
       <div class="kpi"><div class="ico">${icon('check')}</div><div class="val">${p.totalMissionsDone||0}</div><div class="lbl">Missões</div></div>
       <div class="kpi green"><div class="ico">${icon('activity')}</div><div class="val">${p.totalHabitsDone||0}</div><div class="lbl">Hábitos</div></div>
       <div class="kpi gold"><div class="ico">${icon('clock')}</div><div class="val">${p.totalFocusMinutes||0}</div><div class="lbl">Min. Foco</div></div>
+    </div>
+    ${p.customSkills && p.customSkills.length ? `
+    <div class="card" style="margin-top:20px;">
+      <div class="between" style="margin-bottom:12px;">
+        <h3><span class="accent"></span>Skills Customizadas</h3>
+        <button class="btn sm primary" data-action="manage-custom-skills">${icon('edit')} Gerenciar Skills</button>
+      </div>
+      ${p.customSkills.map(cs => {
+        const csLevel = Math.floor((cs.xp||0)/10)+1;
+        const csPct = Math.min(100, (cs.xp||0)%10*10);
+        return `<div style="margin-bottom:10px;">
+          <div class="xpbar-label"><span>${cs.icon||'📌'} ${cs.name}</span><span>Lv. ${csLevel}</span></div>
+          <div class="bar gold"><i style="width:${csPct}%"></i></div>
+        </div>`;
+      }).join('')}
+    </div>` : ''}`;
+
+  bindActions(document.getElementById('view'), {
+    'manage-custom-skills'() { customSkillsModal(); },
+  });
+}
+
+// ============================================================
+// 11c. CUSTOM SKILLS
+// ============================================================
+
+function customSkillsModal() {
+  const p = Store.get('player');
+  const cs = p.customSkills || [];
+
+  openModal(`
+    <div class="modal-head"><div class="mi">${icon('zap')}</div><h2>Skills Customizadas</h2><button class="x">${icon('x')}</button></div>
+    <div style="margin-bottom:14px;">
+      <button class="btn primary full" data-action="new-custom-skill">${icon('plus')} Nova Skill</button>
+    </div>
+    ${cs.length ? cs.map(s => {
+      const sl = Math.floor((s.xp||0)/10)+1;
+      const sp = Math.min(100,(s.xp||0)%10*10);
+      return `<div class="lrow">
+        <div class="lic">${s.icon||'📌'}</div>
+        <div class="lbody">
+          <div class="ltitle">${s.name}</div>
+          <div class="lsub">Lv. ${sl}</div>
+        </div>
+        <div style="width:80px;"><div class="bar gold"><i style="width:${sp}%"></i></div></div>
+        <button class="icon-btn" data-action="edit-custom-skill" data-id="${s.id}">${icon('edit')}</button>
+        <button class="icon-btn" data-action="del-custom-skill" data-id="${s.id}">${icon('trash')}</button>
+      </div>`;
+    }).join('') : '<div class="center-empty"><p>Nenhuma skill customizada.</p></div>'}
+  `);
+
+  bindActions(document.getElementById('modal-root'), {
+    'new-custom-skill'() { closeModal(); customSkillForm(); },
+    'edit-custom-skill'(e, el) { closeModal(); customSkillForm(el.dataset.id); },
+    'del-custom-skill'(e, el) {
+      confirmModal('Excluir esta skill?', ok => {
+        if (!ok) return;
+        const p = Store.get('player');
+        p.customSkills = (p.customSkills||[]).filter(s => s.id !== el.dataset.id);
+        Store.set('player', p);
+        State.changed('player');
+        closeModal();
+        customSkillsModal();
+        showToast('Skill excluída.', 'hp');
+      });
+    },
+  });
+}
+
+function customSkillForm(id) {
+  const p = Store.get('player');
+  const existing = id ? (p.customSkills||[]).find(s => s.id === id) : null;
+  const isEdit = !!existing;
+
+  openModal(`
+    <div class="modal-head"><div class="mi">${icon('zap')}</div><h2>${isEdit?'Editar':'Nova'} Skill Customizada</h2><button class="x">${icon('x')}</button></div>
+    <div class="field"><label>Nome</label><input class="input" id="cs-name" value="${isEdit?escHtml(existing.name):''}" placeholder="Ex: Programação"></div>
+    <div class="field"><label>Ícone (emoji)</label><input class="input" id="cs-icon" value="${isEdit?escHtml(existing.icon||'📌'):'📌'}" placeholder="📌" style="font-size:20px;max-width:80px;"></div>
+    <button class="btn primary full" data-action="save-custom-skill" data-id="${id||''}">${icon('check')} ${isEdit?'Salvar':'Criar'}</button>
+  `);
+
+  document.querySelector('[data-action=save-custom-skill]')?.addEventListener('click', () => {
+    const name = document.getElementById('cs-name')?.value.trim();
+    if (!name) return showToast('Digite um nome para a skill.', 'hp');
+    const icon = document.getElementById('cs-icon')?.value.trim() || '📌';
+    const p = Store.get('player');
+    if (!p.customSkills) p.customSkills = [];
+    if (isEdit) {
+      const s = p.customSkills.find(x => x.id === id);
+      if (s) { s.name = name; s.icon = icon; }
+    } else {
+      p.customSkills.push({ id: uid(), name, icon, xp: 0 });
+    }
+    Store.set('player', p);
+    State.changed('player');
+    closeModal();
+    customSkillsModal();
+    showToast(isEdit?'Skill atualizada!':'Skill criada!', 'success');
+  });
+}
+
+// ——— VIEW: Água ———
+function viewAgua() {
+  const p = Store.get('player');
+  const agua = Store.get('agua') || DEFAULTS.agua;
+  const copos = agua.copos || 0;
+  const meta = agua.meta || 8;
+  const pct = Math.min(100, Math.round(copos / meta * 100));
+  const todayStr = today();
+  const hist = agua.historico || {};
+  const histEntries = Object.entries(hist).sort((a,b) => b[0]>a[0]?1:-1).slice(0,7);
+
+  document.getElementById('view').innerHTML = `
+    <div class="grid g-2" style="margin-bottom:20px;">
+      <div class="card" style="text-align:center;padding:30px;">
+        <div style="font-size:72px;margin-bottom:8px;">💧</div>
+        <div style="font-size:48px;font-weight:800;color:var(--primary-bright);">${copos}/${meta}</div>
+        <div class="muted" style="font-size:14px;margin-bottom:16px;">copos de água hoje</div>
+        <div class="bar" style="height:16px;margin-bottom:20px;"><i style="width:${pct}%;background:var(--primary);border-radius:999px;"></i></div>
+        <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;">
+          <button class="btn primary" data-action="add-copo">${icon('plus')} +1 copo</button>
+          <button class="btn primary" data-action="add-copo-2">${icon('plus')} +2 copos</button>
+          <button class="btn ghost" data-action="rem-copo">${icon('x')} -1</button>
+        </div>
+        <div style="margin-top:12px;">
+          <button class="btn sm ghost" data-action="set-meta">${icon('edit')} Meta: ${meta} copos</button>
+        </div>
+      </div>
+      <div class="card">
+        <h3><span class="accent"></span>Últimos Dias</h3>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          ${histEntries.length ? histEntries.map(([date, count]) => `
+            <div class="between">
+              <span style="font-size:13px;">${new Date(date+'T00:00:00').toLocaleDateString('pt-BR',{weekday:'short',day:'numeric',month:'short'})}</span>
+              <span style="font-weight:700;color:var(--primary-bright);">${'💧'.repeat(Math.min(count,8))} ${count}</span>
+            </div>`).join('') : '<div class="muted" style="font-size:13px;">Nenhum registro ainda.</div>'}
+        </div>
+      </div>
+    </div>
+    <div class="kpi"><div class="ico">${icon('heart')}</div><div class="val">${agua.totalDias||0}</div><div class="lbl">Dias com meta batida</div></div>`;
+
+  bindActions(document.getElementById('view'), {
+    'add-copo'() {
+      const agua = Store.get('agua') || DEFAULTS.agua;
+      agua.copos = (agua.copos||0) + 1;
+      if (agua.copos <= agua.meta) addXP(3, 'saude');
+      Store.set('agua', agua);
+      viewAgua();
+    },
+    'add-copo-2'() {
+      const agua = Store.get('agua') || DEFAULTS.agua;
+      agua.copos = (agua.copos||0) + 2;
+      if (agua.copos <= agua.meta) addXP(5, 'saude');
+      Store.set('agua', agua);
+      viewAgua();
+    },
+    'rem-copo'() {
+      const agua = Store.get('agua') || DEFAULTS.agua;
+      if ((agua.copos||0) > 0) agua.copos--;
+      Store.set('agua', agua);
+      viewAgua();
+    },
+    'set-meta'() {
+      const agua = Store.get('agua') || DEFAULTS.agua;
+      openModal(`
+        <div class="modal-head"><div class="mi">${icon('heart')}</div><h2>Meta de Água</h2><button class="x">${icon('x')}</button></div>
+        <div class="field"><label>Copos por dia</label><input class="input" id="agua-meta" type="number" value="${agua.meta||8}" min="1" max="30"></div>
+        <button class="btn primary full" data-action="save-agua-meta">Salvar</button>`);
+      document.querySelector('[data-action=save-agua-meta]')?.addEventListener('click', () => {
+        const v = parseInt(document.getElementById('agua-meta')?.value)||8;
+        const agua = Store.get('agua') || DEFAULTS.agua;
+        agua.meta = v;
+        Store.set('agua', agua);
+        closeModal();
+        viewAgua();
+        showToast('Meta atualizada!', 'success');
+      });
+    },
+  });
+}
+
+// ——— VIEW: Calendário ———
+function viewCalendario() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth();
+
+  document.getElementById('view').innerHTML = `
+    <div class="card" style="margin-bottom:16px;">
+      <div class="between" style="margin-bottom:8px;">
+        <button class="btn ghost sm" data-action="prev-month">${icon('x')} Anterior</button>
+        <h3 style="margin:0;" id="cal-title">${now.toLocaleDateString('pt-BR',{month:'long',year:'numeric'})}</h3>
+        <button class="btn ghost sm" data-action="next-month">Próximo ${icon('x')}</button>
+      </div>
+      <div id="cal-grid"></div>
+    </div>
+    <div class="card">
+      <h3><span class="accent"></span>Ofensiva</h3>
+      <div id="cal-streak"></div>
     </div>`;
+
+  let calYear = year, calMonth = month;
+  renderCalendario(calYear, calMonth);
+
+  bindActions(document.getElementById('view'), {
+    'prev-month'() {
+      calMonth--;
+      if (calMonth < 0) { calMonth = 11; calYear--; }
+      renderCalendario(calYear, calMonth);
+      document.getElementById('cal-title').textContent = new Date(calYear, calMonth).toLocaleDateString('pt-BR',{month:'long',year:'numeric'});
+    },
+    'next-month'() {
+      calMonth++;
+      if (calMonth > 11) { calMonth = 0; calYear++; }
+      renderCalendario(calYear, calMonth);
+      document.getElementById('cal-title').textContent = new Date(calYear, calMonth).toLocaleDateString('pt-BR',{month:'long',year:'numeric'});
+    },
+  });
+}
+
+function renderCalendario(year, month) {
+  const missions = Store.get('missions') || [];
+  const doneDates = missions.filter(m => m.done && m.completedAt).map(m => m.completedAt.slice(0,10));
+  const uniqueDates = [...new Set(doneDates)];
+
+  const firstDay = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const todayStr = today();
+
+  let html = '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;text-align:center;">';
+  const dayNames = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+  dayNames.forEach(d => { html += `<div style="font-size:11px;color:var(--muted);padding:4px 0;">${d}</div>`; });
+
+  for (let i = 0; i < firstDay; i++) {
+    html += '<div></div>';
+  }
+
+  for (let day = 1; day <= daysInMonth; day++) {
+    const dateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+    const hasMission = uniqueDates.includes(dateStr);
+    const isToday = dateStr === todayStr;
+    html += `<div style="padding:6px 0;border-radius:10px;background:${isToday?'var(--primary-dim)':'transparent'};font-weight:${isToday?'700':'400'};position:relative;">
+      <span style="font-size:13px;">${day}</span>
+      ${hasMission ? '<div style="width:6px;height:6px;border-radius:50%;background:var(--primary);margin:2px auto 0;"></div>' : ''}
+    </div>`;
+  }
+
+  html += '</div>';
+  document.getElementById('cal-grid').innerHTML = html;
+
+  // Streak
+  const streak = getStreakDays(uniqueDates);
+  document.getElementById('cal-streak').innerHTML = `
+    <div style="display:flex;align-items:center;gap:12px;">
+      <div style="font-size:36px;">${streak >= 7 ? '🔥' : streak >= 3 ? '💪' : '📅'}</div>
+      <div><div style="font-size:24px;font-weight:800;">${streak}</div><div class="muted" style="font-size:13px;">dias consecutivos com missões</div></div>
+    </div>`;
+}
+
+function getStreakDays(missionsDates) {
+  if (!missionsDates || !missionsDates.length) return 0;
+  const sorted = [...missionsDates].sort().reverse();
+  let streak = 0;
+  const todayStr = today();
+  const yesterday = new Date(Date.now()-86400000).toISOString().slice(0,10);
+
+  // Check if today or yesterday has a mission
+  if (sorted[0] === todayStr || sorted[0] === yesterday) {
+    let check = sorted[0];
+    for (const d of sorted) {
+      if (d === check) { streak++; check = new Date(new Date(d+'T00:00:00').getTime()-86400000).toISOString().slice(0,10); }
+      else break;
+    }
+  }
+  return streak;
 }
 
 // ——— VIEW: Mercado ———
@@ -904,13 +1123,12 @@ function viewMercado() {
         if (!ok) return;
         if (spendCoins(item.cost)) {
           if (item.id === 'potion') { healHp(30); showToast('🧪 HP recuperado! (+30)', 'success'); }
-          else if (item.id === 'big_potion') { healHp(999); showToast('🧪 HP totalmente recuperado!', 'success'); }
           else if (item.id === 'streak_freeze') {
             const p = Store.get('player');
             p.streakFreeze = Math.min(3, (p.streakFreeze || 0) + 1);
             Store.set('player', p);
             State.changed('player');
-            showToast(`❄️ +1 Congelar Ofensiva (${p.streakFreeze}/3)`, '');
+            showToast(`❄️ Freeze ativado! (${p.streakFreeze}/3)`, 'gold');
           }
           else showToast(`🎁 ${item.name} adquirido!`, 'gold');
           viewMercado();
@@ -1571,6 +1789,14 @@ function viewConfiguracoes() {
       <div class="field">
         <div class="between"><label style="margin:0;cursor:pointer;">Perder vida ao falhar (-10HP por missão)</label><div class="switch ${settings.hardcoreHp?'on':''}" data-action="toggle-setting" data-key="hardcoreHp"></div></div>
       </div>
+      <div class="field">
+        <label>Meta Diária de XP</label>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          ${[50,100,150,200,500].map(v =>
+            `<button class="btn sm ${(settings.dailyXpGoal||100)===v?'primary':'ghost'}" data-action="set-xp-goal" data-value="${v}">${v} XP</button>`
+          ).join('')}
+        </div>
+      </div>
     </div>
 
     <div class="card" style="margin-bottom:16px;">
@@ -1607,6 +1833,14 @@ function viewConfiguracoes() {
       viewConfiguracoes();
       const label = key === 'hardcoreFail' ? 'Auto-falha' : key === 'hardcoreHp' ? 'Perder vida' : 'Opção';
       showToast(label + ' ' + (s[key] ? 'ativada' : 'desativada') + '.', '');
+    },
+    'set-xp-goal'(e, el) {
+      const val = parseInt(el.dataset.value);
+      const s = Store.get('settings') || DEFAULTS.settings;
+      s.dailyXpGoal = val;
+      Store.set('settings', s);
+      viewConfiguracoes();
+      showToast(`Meta diária: ${val} XP`, 'success');
     },
     'export-data'() {
       const data = Store.export();
@@ -1668,89 +1902,65 @@ function checkDailyReset() {
   const todayStr = today();
   if (last === todayStr) return;
 
-  console.debug('[DailyReset] last=%s today=%s', last, todayStr);
-
   const p = Store.get('player');
   const settings = Store.get('settings') || DEFAULTS.settings;
   const missions = Store.get('missions') || [];
 
-  // 1. Apply fail damage for hardcore mode
-  applyFailDamage(p, settings, missions, last);
-
-  // 2. Reset daily missions
-  resetDailyMissions(missions, todayStr);
-
-  // 3. Check streak continuity
-  checkStreakContinuity(p, last, todayStr);
-
-  // 4. Reset daily XP counter
-  p.dailyXp = 0;
-
-  Store.set('missions', missions);
-  Store.set('player', p);
-  Store.set('lastDailyReset', todayStr);
-  State.changed('player');
-}
-
-function applyFailDamage(p, settings, missions, last) {
-  if (!last) return; // first ever run, skip damage
-  if (!settings.hardcoreFail) return;
   let hpLost = 0;
-  const yesterday = dateSub(1);
-  missions.forEach(m => {
-    if (!m.done && m.date && m.date <= yesterday && !m.isDaily) {
-      if (settings.hardcoreHp) hpLost += 10;
-    }
-  });
-  if (hpLost > 0) {
-    p.hp = Math.max(0, p.hp - hpLost);
-    showToast(`💔 Perdeu ${hpLost} HP por missões incompletas!`, 'hp');
-  }
-}
 
-function resetDailyMissions(missions, todayStr) {
+  // Auto-fail incomplete missions from yesterday
+  if (settings.hardcoreFail) {
+    missions.forEach(m => {
+      if (!m.done && m.date && m.date < todayStr && !m.isDaily) {
+        if (settings.hardcoreHp) hpLost += 10;
+      }
+    });
+  }
+
+  // Reset daily missions
   missions.forEach(m => {
     if (m.isDaily && m.done && m.date !== todayStr) {
       m.done = false;
       m.date = todayStr;
     }
   });
-}
 
-function checkStreakContinuity(p, last, todayStr) {
-  if (!last) return; // first ever run
-  // The streak should have been updated yesterday when missions were done
-  // Here we only check if the player missed a FULL day (last < yesterday)
-  const yesterday = dateSub(1);
-  if (last < yesterday) {
-    // Check if player has streak freeze
+  // Streak check with freeze protection
+  const yesterday = new Date(Date.now()-86400000).toISOString().slice(0,10);
+  if (last && last !== yesterday) {
     if (p.streakFreeze > 0) {
       p.streakFreeze--;
-      showToast('❄️ Streak congelado! Você foi protegido.', '');
-      console.debug('[DailyReset] Streak freeze consumed, remaining=%d', p.streakFreeze);
+      showToast(`❄️ Ofensiva protegida! (${p.streakFreeze}/3 freezes restantes)`, '');
     } else {
       p.streak = 0;
-      console.debug('[DailyReset] Streak reset to 0');
     }
   }
-}
 
-// Date helpers
-function dateSub(days) {
-  return todayInTzOffset(-days);
-}
-function todayInTzOffset(offsetDays) {
-  try {
-    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    const d = new Date();
-    d.setDate(d.getDate() + (offsetDays || 0));
-    const formatter = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' });
-    return formatter.format(d);
-  } catch {
-    const d = new Date();
-    d.setDate(d.getDate() + (offsetDays || 0));
-    return d.toISOString().slice(0,10);
+  if (hpLost > 0) {
+    p.hp = Math.max(0, p.hp - hpLost);
+    showToast(`💔 Perdeu ${hpLost} HP por missões incompletas!`, 'hp');
   }
+
+  Store.set('missions', missions);
+  Store.set('player', p);
+
+  // Save agua daily history and reset
+  const agua = Store.get('agua') || DEFAULTS.agua;
+  if ((agua.copos||0) > 0) {
+    if (!agua.historico) agua.historico = {};
+    agua.historico[todayStr] = agua.copos;
+    if (agua.copos >= (agua.meta||8)) agua.totalDias = (agua.totalDias||0) + 1;
+    agua.copos = 0;
+    Store.set('agua', agua);
+  }
+
+  // Reset daily XP meta
+  p.dailyXp = 0;
+  p.metaBatidaHoje = false;
+
+  Store.set('lastDailyReset', todayStr);
+  Store.set('player', p);
+  State.changed('player');
 }
 
 // ============================================================
@@ -1759,8 +1969,10 @@ function todayInTzOffset(offsetDays) {
 const VIEW_MAP = {
   dashboard: viewDashboard, campo: viewCampo, personagem: viewPersonagem,
   mercado: viewMercado, habitos: viewHabitos, academia: viewAcademia,
+  agua: viewAgua,
   caverna: viewCaverna, financas: viewFinancas, estudos: viewEstudos,
   midia: viewMidia, notas: viewNotas, conquistas: viewConquistas,
+  calendario: viewCalendario,
   temas: viewTemas, configuracoes: viewConfiguracoes,
   social: viewSocial, clans: viewClans, rankings: viewRankings,
 };
