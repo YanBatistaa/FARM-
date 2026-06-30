@@ -76,6 +76,8 @@ const ACHIEVEMENTS = [
   { id: 'streak_30',      name: 'Ofensiva Mortal', desc: 'Mantenha 30 dias de ofensiva.',         icon: '💀', reward: 100 },
   { id: 'level_5',        name: 'Mercenário',      desc: 'Alcance o nível 5.',                    icon: '⭐', reward: 40 },
   { id: 'level_10',       name: 'Lenda',           desc: 'Alcance o nível 10.',                   icon: '👑', reward: 100 },
+  { id: 'level_20',       name: 'Imortal',         desc: 'Alcance o nível 20.',                   icon: '🌟', reward: 200 },
+  { id: 'level_50',       name: 'Supremo',         desc: 'Alcance o nível 50.',                   icon: '💫', reward: 500 },
   { id: 'first_coin',     name: 'Primeira Moeda',  desc: 'Ganhe sua primeira moeda.',             icon: '🪙', reward: 5 },
   { id: 'hoard_100',      name: 'Poupeiro',        desc: 'Acumule 100 moedas.',                   icon: '💰', reward: 50 },
 ];
@@ -126,6 +128,7 @@ const DEFAULTS = {
     skills: { destreza: 0, saude: 0, estudos: 0, gestao: 0 },
     customSkills: [],
     totalMissionsDone: 0, totalHabitsDone: 0, totalFocusMinutes: 0,
+    gameOver: false, deaths: 0, bestStreak: 0, streakFreeze: 0,
   },
   missions: [],
   habits: [],
@@ -135,7 +138,11 @@ const DEFAULTS = {
   estudos: { subjects: [], materials: [] },
   midia: [],
   notes: [],
-  market: { items: [{ id:'potion', name:'Poção de Cura', desc:'Recupera 30 HP', cost: 15 }], purchases: [] },
+  market: { items: [
+    { id:'potion', name:'Poção de Cura', desc:'Recupera 30 HP', cost: 15 },
+    { id:'streak_freeze', name:'❄️ Congelar Ofensiva', desc:'Protege seu streak por 1 dia', cost: 30 },
+    { id:'big_potion', name:'🧪 Poção Grande', desc:'Recupera 100% do HP', cost: 40 },
+  ], purchases: [] },
   settings: { theme: 'violeta', hardcoreFail: false, hardcoreHp: false },
   achievements: { claimed: [] },
   lastDailyReset: null,
@@ -305,7 +312,14 @@ function applyTheme(name) {
 function getLevelConfig(level) {
   const found = LEVELS.find(l => l.level === level);
   if (found) return found;
-  return { level, xpNeeded: level * 200 + 1200, title: 'Lenda' };
+  // Dynamic formula for levels beyond the predefined array
+  const xpNeeded = 200 + level * 150;
+  const TITLES_EXTENDED = [
+    'Lenda', 'Imortal', 'Divino', 'Supremo', 'Absoluto',
+    'Eterno', 'Cosmico', 'Transcendente', 'Onipotente', 'Zen',
+  ];
+  const title = TITLES_EXTENDED[Math.floor((level - 11) / 5)] || 'Mestre Supremo';
+  return { level, xpNeeded, title };
 }
 
 function addXP(amount, skillType) {
@@ -353,6 +367,10 @@ function spendCoins(amount) {
 function healHp(amount) {
   const p = Store.get('player');
   p.hp = Math.min(p.maxHp, p.hp + amount);
+  if (p.gameOver && p.hp > 0) {
+    p.gameOver = false;
+    showToast('💫 Você reviveu!', 'success');
+  }
   Store.set('player', p);
   State.changed('player');
 }
@@ -362,6 +380,35 @@ function damageHp(amount) {
   p.hp = Math.max(0, p.hp - amount);
   Store.set('player', p);
   State.changed('player');
+  checkDeath();
+}
+
+function checkDeath() {
+  const p = Store.get('player');
+  if (p.hp <= 0 && !p.gameOver) {
+    p.gameOver = true;
+    p.deaths = (p.deaths || 0) + 1;
+    Store.set('player', p);
+    State.changed('player');
+    renderAll();
+  }
+}
+
+function revivePlayer() {
+  const p = Store.get('player');
+  const cost = 30 + (p.deaths || 0) * 10; // aumenta a cada morte
+  if (p.coins < cost) {
+    showToast(`💰 Precisava de ${cost} moedas para reviver. Você tem ${p.coins}.`, 'hp');
+    return false;
+  }
+  p.coins -= cost;
+  p.hp = Math.round(p.maxHp * 0.5); // revive com 50% HP
+  p.gameOver = false;
+  Store.set('player', p);
+  State.changed('player');
+  showToast(`💫 Você reviveu! -${cost} moedas`, 'gold');
+  renderAll();
+  return true;
 }
 
 function calcReward(difficulty) {
@@ -388,6 +435,8 @@ function checkAchievements() {
       case 'streak_30': earned = p.streak >= 30; break;
       case 'level_5': earned = p.level >= 5; break;
       case 'level_10': earned = p.level >= 10; break;
+      case 'level_20': earned = p.level >= 20; break;
+      case 'level_50': earned = p.level >= 50; break;
       case 'first_coin': earned = p.coins >= 1; break;
       case 'hoard_100': earned = p.coins >= 100; break;
     }
@@ -412,6 +461,9 @@ function checkAchievements() {
 function renderSidebar(route) {
   const p = Store.get('player');
   const xpPct = Math.min(100, Math.round((p.xp / p.xpToNext) * 100));
+  const hpPct = Math.round(p.hp / p.maxHp * 100);
+  const hpLow = hpPct <= 25 && hpPct > 0;
+  const gameOverBanner = p.gameOver ? '<div class="go-sidebar-banner" style="text-align:center;padding:8px;background:var(--danger);color:#fff;font-weight:700;font-size:13px;border-radius:8px;margin-bottom:8px;">💀 DERROTADO</div>' : '';
 
   let navHTML = '';
   NAV_GROUPS.forEach(g => {
@@ -429,14 +481,16 @@ function renderSidebar(route) {
       <div class="name">Z<b>ÊNITE</b></div>
     </div>
     <div class="profile">
+      ${gameOverBanner}
       <div class="top">
-        <div class="avatar">${p.avatar||'😺'}<span class="lvl-badge">${p.level}</span></div>
+        <div class="avatar ${p.gameOver?'go-avatar':''}">${p.avatar||'😺'}<span class="lvl-badge">${p.level}</span></div>
         <div class="who"><div class="nm">${p.name}</div><div class="cls">${p.title}</div></div>
       </div>
       <div class="stats-row">
-        <span class="pill hp">${icon('heart')} ${p.hp}/${p.maxHp}</span>
+        <span class="pill hp" style="${hpLow?'animation:pulse-hp 1.5s infinite;':''}">${icon('heart')} ${p.hp}/${p.maxHp}</span>
         <span class="pill en">${icon('zap')} ${p.streak}</span>
         <span class="pill co">${icon('coin')} ${p.coins}</span>
+        ${p.streakFreeze > 0 ? `<span class="pill freeze">❄️ ${p.streakFreeze}</span>` : ''}
       </div>
       <div class="xpbar-wrap">
         <div class="xpbar-label"><span>XP</span><span>${p.xp}/${p.xpToNext}</span></div>
@@ -454,6 +508,7 @@ function renderSidebar(route) {
   });
   document.querySelector('[data-action=quick-mission]')?.addEventListener('click', () => {
     closeSidebarMobile();
+    if (p.gameOver) return showToast('💀 Você está derrotado! Reviva primeiro.', 'hp');
     Router.navigate('campo');
     setTimeout(() => document.querySelector('[data-action=new-mission]')?.click(), 100);
   });
@@ -498,7 +553,19 @@ function bindActions(container, handlers) {
 }
 
 function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2,6); }
-function today() { return new Date().toISOString().slice(0,10); }
+function today() { return todayInTz(); }
+
+// Timezone-aware today string
+function todayInTz() {
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const now = new Date();
+    const formatter = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' }); // en-CA → YYYY-MM-DD
+    return formatter.format(now);
+  } catch {
+    return new Date().toISOString().slice(0,10);
+  }
+}
 
 // ============================================================
 // 11. VIEWS
@@ -508,14 +575,43 @@ function today() { return new Date().toISOString().slice(0,10); }
 function viewDashboard() {
   const p = Store.get('player');
   const missions = Store.get('missions') || [];
+
+  // Game Over screen
+  if (p.gameOver) {
+    const reviveCost = 30 + (p.deaths || 0) * 10;
+    document.getElementById('view').innerHTML = `
+      <div class="center-empty" style="padding:60px 20px;">
+        <div style="font-size:64px;margin-bottom:16px;">💀</div>
+        <h2 style="font-weight:800;font-size:28px;margin-bottom:8px;">Você foi derrotado!</h2>
+        <p class="muted" style="margin-bottom:4px;">${p.name} caiu em batalha no nível ${p.level}.</p>
+        <p class="muted" style="margin-bottom:24px;">Mortes: ${p.deaths} · Streak máximo: ${p.bestStreak||p.streak} dias</p>
+        <div class="card" style="text-align:center;padding:24px;max-width:320px;margin:0 auto;">
+          <div style="font-size:32px;margin-bottom:8px;">${icon('coin')}</div>
+          <div style="font-weight:700;font-size:18px;margin-bottom:4px;">Reviver com ${reviveCost} moedas</div>
+          <div class="muted" style="font-size:13px;margin-bottom:16px;">Você revive com 50% do HP max.</div>
+          <button class="btn gold" data-action="revive" ${p.coins<reviveCost?'disabled':''}>
+            ${p.coins>=reviveCost?'💫 Reviver':'💰 Faltam '+(reviveCost-p.coins)+' moedas'}
+          </button>
+          <div style="margin-top:16px;font-size:13px;" class="muted">Moedas: ${p.coins}</div>
+        </div>
+      </div>`;
+    bindActions(document.getElementById('view'), {
+      'revive': revivePlayer,
+    });
+    return;
+  }
+
   const recent = [...missions].filter(m => m.done).sort((a,b) => (b.completedAt||'')>(a.completedAt||'')?1:-1).slice(0,5);
   const pending = missions.filter(m => !m.done && m.date === today()).length;
+  const hpPct = Math.round(p.hp / p.maxHp * 100);
+  const hpWarning = hpPct <= 25 && hpPct > 0 ? `<div class="alert hp-critical" style="margin-bottom:16px;padding:12px 16px;border-radius:12px;background:var(--hp-dim, rgba(251,106,138,.12));border:1px solid rgba(251,106,138,.25);color:var(--hp);font-weight:600;font-size:14px;">⚠️ HP crítico! Use poções no Mercado para se curar.</div>` : '';
 
   document.getElementById('view').innerHTML = `
+    ${hpWarning}
     <div class="grid g-4" style="margin-bottom:20px;">
       <div class="kpi"><div class="ico">${icon('zap')}</div><div class="val">${p.xp}</div><div class="lbl">XP / ${p.xpToNext}</div></div>
       <div class="kpi gold"><div class="ico">${icon('coin')}</div><div class="val">${p.coins}</div><div class="lbl">Moedas</div></div>
-      <div class="kpi hp"><div class="ico">${icon('heart')}</div><div class="val">${p.hp}</div><div class="lbl">HP · Nv ${p.level}</div></div>
+      <div class="kpi ${hpPct<=25?'hp':''}"><div class="ico">${icon('heart')}</div><div class="val">${p.hp}<span style="font-size:13px;color:var(--muted);">/${p.maxHp}</span></div><div class="lbl">HP · Nv ${p.level}</div></div>
       <div class="kpi green"><div class="ico">${icon('activity')}</div><div class="val">${p.streak}</div><div class="lbl">Ofensiva (dias)</div></div>
     </div>
     <div class="grid g-2">
@@ -628,6 +724,8 @@ function missionModal(id) {
   document.querySelector('[data-action=save-mission]')?.addEventListener('click', () => {
     const title = document.getElementById('f-title')?.value.trim();
     if (!title) return showToast('Digite um título para a missão.', 'hp');
+    const p = Store.get('player');
+    if (p.gameOver) { closeModal(); return showToast('💀 Você está derrotado! Reviva primeiro.', 'hp'); }
     const desc = document.getElementById('f-desc')?.value.trim() || '';
     const skill = document.getElementById('f-skill')?.value || 'destreza';
     const isDaily = document.getElementById('f-daily')?.checked || false;
@@ -659,10 +757,11 @@ function toggleMission(id) {
   const m = missions.find(x => x.id === id);
   if (!m) return;
   if (m.done) return showToast('Missão já concluída.', '');
+  const p = Store.get('player');
+  if (p.gameOver) return showToast('💀 Você está derrotado! Reviva primeiro.', 'hp');
 
   m.done = true;
   m.completedAt = new Date().toISOString();
-  const p = Store.get('player');
   p.totalMissionsDone = (p.totalMissionsDone || 0) + 1;
   Store.set('missions', missions);
   Store.set('player', p);
@@ -684,15 +783,12 @@ function deleteMission(id) {
 function updateStreak() {
   const p = Store.get('player');
   const last = Store.get('lastDailyReset');
-  const yesterday = new Date(Date.now()-86400000).toISOString().slice(0,10);
-
-  if (last === yesterday || last === today()) {
-    // Continue streak
-  } else {
-    p.streak = 0;
+  const todayStr = today();
+  // Only increment if not already done today
+  if (last !== todayStr) {
+    p.streak++;
+    if (p.streak > (p.bestStreak || 0)) p.bestStreak = p.streak;
   }
-  p.streak++;
-  if (p.streak > p.bestStreak) p.bestStreak = p.streak;
   Store.set('player', p);
   State.changed('player');
 }
@@ -723,6 +819,7 @@ function viewPersonagem() {
         <div style="margin:16px 0;">
           <div class="xpbar-label"><span>XP</span><span>${p.xp}/${p.xpToNext}</span></div>
           <div class="bar"><i style="width:${xpPct}%"></i></div>
+          <div class="muted" style="font-size:12px;margin-top:4px;">${p.xpToNext - p.xp} XP para o próximo nível</div>
         </div>
         <div class="stats-row" style="justify-content:center;">
           <span class="pill hp">${icon('heart')} ${p.hp}/${p.maxHp}</span>
@@ -807,6 +904,14 @@ function viewMercado() {
         if (!ok) return;
         if (spendCoins(item.cost)) {
           if (item.id === 'potion') { healHp(30); showToast('🧪 HP recuperado! (+30)', 'success'); }
+          else if (item.id === 'big_potion') { healHp(999); showToast('🧪 HP totalmente recuperado!', 'success'); }
+          else if (item.id === 'streak_freeze') {
+            const p = Store.get('player');
+            p.streakFreeze = Math.min(3, (p.streakFreeze || 0) + 1);
+            Store.set('player', p);
+            State.changed('player');
+            showToast(`❄️ +1 Congelar Ofensiva (${p.streakFreeze}/3)`, '');
+          }
           else showToast(`🎁 ${item.name} adquirido!`, 'gold');
           viewMercado();
         } else {
@@ -1563,44 +1668,89 @@ function checkDailyReset() {
   const todayStr = today();
   if (last === todayStr) return;
 
+  console.debug('[DailyReset] last=%s today=%s', last, todayStr);
+
   const p = Store.get('player');
   const settings = Store.get('settings') || DEFAULTS.settings;
   const missions = Store.get('missions') || [];
 
+  // 1. Apply fail damage for hardcore mode
+  applyFailDamage(p, settings, missions, last);
+
+  // 2. Reset daily missions
+  resetDailyMissions(missions, todayStr);
+
+  // 3. Check streak continuity
+  checkStreakContinuity(p, last, todayStr);
+
+  // 4. Reset daily XP counter
+  p.dailyXp = 0;
+
+  Store.set('missions', missions);
+  Store.set('player', p);
+  Store.set('lastDailyReset', todayStr);
+  State.changed('player');
+}
+
+function applyFailDamage(p, settings, missions, last) {
+  if (!last) return; // first ever run, skip damage
+  if (!settings.hardcoreFail) return;
   let hpLost = 0;
-
-  // Auto-fail incomplete missions from yesterday
-  if (settings.hardcoreFail) {
-    missions.forEach(m => {
-      if (!m.done && m.date && m.date < todayStr && !m.isDaily) {
-        if (settings.hardcoreHp) hpLost += 10;
-      }
-    });
+  const yesterday = dateSub(1);
+  missions.forEach(m => {
+    if (!m.done && m.date && m.date <= yesterday && !m.isDaily) {
+      if (settings.hardcoreHp) hpLost += 10;
+    }
+  });
+  if (hpLost > 0) {
+    p.hp = Math.max(0, p.hp - hpLost);
+    showToast(`💔 Perdeu ${hpLost} HP por missões incompletas!`, 'hp');
   }
+}
 
-  // Reset daily missions
+function resetDailyMissions(missions, todayStr) {
   missions.forEach(m => {
     if (m.isDaily && m.done && m.date !== todayStr) {
       m.done = false;
       m.date = todayStr;
     }
   });
+}
 
-  // Streak check
-  const yesterday = new Date(Date.now()-86400000).toISOString().slice(0,10);
-  if (last && last !== yesterday) {
-    p.streak = 0;
+function checkStreakContinuity(p, last, todayStr) {
+  if (!last) return; // first ever run
+  // The streak should have been updated yesterday when missions were done
+  // Here we only check if the player missed a FULL day (last < yesterday)
+  const yesterday = dateSub(1);
+  if (last < yesterday) {
+    // Check if player has streak freeze
+    if (p.streakFreeze > 0) {
+      p.streakFreeze--;
+      showToast('❄️ Streak congelado! Você foi protegido.', '');
+      console.debug('[DailyReset] Streak freeze consumed, remaining=%d', p.streakFreeze);
+    } else {
+      p.streak = 0;
+      console.debug('[DailyReset] Streak reset to 0');
+    }
   }
+}
 
-  if (hpLost > 0) {
-    p.hp = Math.max(0, p.hp - hpLost);
-    showToast(`💔 Perdeu ${hpLost} HP por missões incompletas!`, 'hp');
+// Date helpers
+function dateSub(days) {
+  return todayInTzOffset(-days);
+}
+function todayInTzOffset(offsetDays) {
+  try {
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const d = new Date();
+    d.setDate(d.getDate() + (offsetDays || 0));
+    const formatter = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' });
+    return formatter.format(d);
+  } catch {
+    const d = new Date();
+    d.setDate(d.getDate() + (offsetDays || 0));
+    return d.toISOString().slice(0,10);
   }
-
-  Store.set('missions', missions);
-  Store.set('player', p);
-  Store.set('lastDailyReset', todayStr);
-  State.changed('player');
 }
 
 // ============================================================

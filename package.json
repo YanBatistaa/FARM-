@@ -1,0 +1,24 @@
+{
+  "name": "farm",
+  "version": "1.0.0",
+  "description": "> *\"A jornada até o seu ápice.\"*",
+  "main": "app.js",
+  "scripts": {
+    "test": "vitest run --reporter verbose"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/YanBatistaa/FARM-.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/YanBatistaa/FARM-/issues"
+  },
+  "homepage": "https://github.com/YanBatistaa/FARM-#readme",
+  "devDependencies": {
+    "vitest": "^4.1.9"
+  }
+}
