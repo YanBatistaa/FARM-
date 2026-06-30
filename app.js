@@ -152,7 +152,7 @@ const DEFAULTS = {
     { id:'loot_gold', name:'👑 Baú de Ouro', desc:'Sorteio com itens épicos', cost: 100 },
   ], purchases: [] },
   agua: { copos: 0, meta: 8, historico: {} },
-  settings: { theme: 'violeta', hardcoreFail: false, hardcoreHp: false, dailyXpGoal: 100, maxDailyXp: 500 },
+  settings: { theme: 'violeta', hardcoreFail: false, hardcoreHp: false, dailyXpGoal: 100, maxDailyXp: 500, notifyEnabled: true, notifyHour: 20, notifyMin: 0 },
   achievements: { claimed: [] },
   lastDailyReset: null,
 };
@@ -2497,6 +2497,31 @@ State.on('change:player', () => {
   renderSidebar(route);
 });
 
+// ——— Notifications ———
+function requestNotificationPermission() {
+  if (!('Notification' in window)) return;
+  if (Notification.permission === 'default') Notification.requestPermission().catch(() => {});
+}
+function scheduleDailyNotification() {
+  if (!('Notification' in window) || Notification.permission !== 'granted') return;
+  const settings = Store.get('settings') || {};
+  if (!settings.notifyEnabled) return;
+  const now = new Date();
+  const h = settings.notifyHour || 20, m = settings.notifyMin || 0;
+  const t = new Date(now); t.setHours(h, m, 0, 0);
+  if (t <= now) t.setDate(t.getDate() + 1);
+  setTimeout(() => {
+    const missions = Store.get('missions') || [];
+    const hoje = today();
+    const done = missions.some(mx => mx.done && mx.completedAt && mx.completedAt.slice(0,10) === hoje);
+    const p = Store.get('player');
+    try { new Notification(done ? '📋 Bora revisar?' : '🔥 Streak em risco!', {
+      body: done ? 'Veja o que falta para amanhã.' : 'Nenhuma missão hoje — não perca seu streak!',
+      icon: '/icons/icon-192.svg',
+    }); } catch(e) {}
+    scheduleDailyNotification();
+  }, t - now);
+}
 function init() {
   // Initialize store with defaults
   Store.init();
@@ -2507,6 +2532,8 @@ function init() {
 
   // Run daily reset
   checkDailyReset();
+  requestNotificationPermission();
+  setTimeout(scheduleDailyNotification, 3000);
 
   // Show onboarding for new players
   const p = Store.get('player');
