@@ -265,9 +265,24 @@ function showToast(message, type = '') {
   const container = document.getElementById('toasts');
   const el = document.createElement('div');
   el.className = 'toast ' + type;
-  el.innerHTML = message;
+  // Map type to emoji prefix
+  const emojiMap = { gold:'✨', hp:'💔', success:'✅', '' :'' };
+  el.innerHTML = (emojiMap[type]||'') + message;
   container.appendChild(el);
   setTimeout(() => { if (el.parentNode) el.remove(); }, 3000);
+}
+
+// Floating XP animation
+function showFloatingXP(xp, element) {
+  if (!element) return;
+  const rect = element.getBoundingClientRect();
+  const el = document.createElement('div');
+  el.className = 'float-xp';
+  el.textContent = `+${xp}XP`;
+  el.style.left = rect.left + rect.width/2 + 'px';
+  el.style.top = rect.top + 'px';
+  document.body.appendChild(el);
+  setTimeout(() => { if (el.parentNode) el.remove(); }, 1200);
 }
 
 function openModal(html, wide = false) {
