@@ -65,6 +65,7 @@ const DIFFICULTIES = {
 };
 
 const SKILL_NAMES = { destreza: 'Destreza', saude: 'Saúde', estudos: 'Estudos', gestao: 'Gestão' };
+const CATEGORY_ATTR_MAP = { destreza: 'disciplina', saude: 'shape', estudos: 'inteligencia', gestao: 'foco' };
 const SKILL_CLASSES = { destreza: 's-dex', saude: 's-life', estudos: 's-study', gestao: 's-mgmt' };
 const SKILL_ICONS = { destreza: 'zap', saude: 'heart', estudos: 'book', gestao: 'activity' };
 
@@ -125,6 +126,8 @@ const DEFAULTS = {
     title: 'Iniciante',
     skills: { destreza: 0, saude: 0, estudos: 0, gestao: 0 },
     customSkills: [],
+    atributos: { disciplina: 0, foco: 0, inteligencia: 0, shape: 0 },
+    gear: { head: null, body: null, weapon: null, accessory: null },
     totalMissionsDone: 0, totalHabitsDone: 0, totalFocusMinutes: 0,
     streakFreeze: 0,
     dailyXp: 0,
@@ -633,6 +636,7 @@ function viewCampo() {
             <div class="m-meta">
               ${badges}
               ${m.skill?`<span class="tag v">${SKILL_NAMES[m.skill]||m.skill}</span>`:''}
+              ${m.subtasks && m.subtasks.length ? `<span class="tag">📋 ${m.subtasks.filter(st=>st.done).length}/${m.subtasks.length}</span>` : ''}
             </div>
           </div>
           <div class="m-reward"><span class="xp">+${r.xp}XP</span>${r.coins > 0 ? `<span class="co">+${r.coins}</span>` : ''}</div>
@@ -758,7 +762,7 @@ function missionModal(id) {
       }
     } else {
       const missions = Store.get('missions') || [];
-      missions.push({ id: uid(), title, description: desc, skill, difficulty, done: false, date: todayStr, createdAt: new Date().toISOString(), completedAt: null, isDaily, reward, type, startDate, dueDate });
+      missions.push({ id: uid(), title, description: desc, skill, difficulty, done: false, date: todayStr, createdAt: new Date().toISOString(), completedAt: null, isDaily, reward, type, startDate, dueDate, subtasks: [] });
       Store.set('missions', missions);
       showToast(`Missão criada! (+${reward.xp}XP quando concluir)`, '');
     }
@@ -798,6 +802,14 @@ function toggleMission(id) {
   addXP(m.reward.xp, m.skill);
   addCoins(m.reward.coins);
   updateStreak();
+  // Increment atributo based on skill
+  if (m.skill && CATEGORY_ATTR_MAP[m.skill]) {
+    const attr = CATEGORY_ATTR_MAP[m.skill];
+    const pAttr = Store.get('player');
+    if (!pAttr.atributos) pAttr.atributos = { disciplina: 0, foco: 0, inteligencia: 0, shape: 0 };
+    pAttr.atributos[attr] = (pAttr.atributos[attr] || 0) + 1;
+    Store.set('player', pAttr);
+  }
   showToast(`✅ ${m.title} concluída! +${m.reward.xp}XP +${m.reward.coins} moedas`, 'gold');
   // Check for loot box drop (25% chance)
   if (Math.random() < 0.25) {
@@ -889,6 +901,15 @@ function viewPersonagem() {
       <div class="kpi"><div class="ico">${icon('check')}</div><div class="val">${p.totalMissionsDone||0}</div><div class="lbl">Missões</div></div>
       <div class="kpi green"><div class="ico">${icon('activity')}</div><div class="val">${p.totalHabitsDone||0}</div><div class="lbl">Hábitos</div></div>
       <div class="kpi gold"><div class="ico">${icon('clock')}</div><div class="val">${p.totalFocusMinutes||0}</div><div class="lbl">Min. Foco</div></div>
+    </div>
+    <div class="card" style="margin-top:20px;">
+      <h3><span class="accent"></span>Atributos</h3>
+      <div class="grid g-2" style="margin-top:8px;">
+        ${Object.entries(p.atributos||{disciplina:0,foco:0,inteligencia:0,shape:0}).map(([k,v]) =>
+          `<div><div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:2px;"><span>${k.charAt(0).toUpperCase()+k.slice(1)}</span><span>Lv. ${Math.floor(v/5)+1}</span></div>
+          <div class="bar" style="height:8px;"><i style="width:${Math.min(100,(v%5)*20)}%"></i></div></div>`
+        ).join('')}
+      </div>
     </div>
     ${p.customSkills && p.customSkills.length ? `
     <div class="card" style="margin-top:20px;">
