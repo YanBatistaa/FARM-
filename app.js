@@ -225,6 +225,7 @@ const ROUTES = {
   midia:{label:'Mídia',icon:'film',group:'cérebro'},
   notas:{label:'Notas',icon:'file',group:'cérebro'},
   conquistas:{label:'Conquistas',icon:'trophy',group:'mais'},
+  estatisticas:{label:'Estatísticas',icon:'activity',group:'núcleo'},
   temas:{label:'Temas',icon:'palette',group:'mais'},
   configuracoes:{label:'Configurações',icon:'settings',group:'mais'},
   social:{label:'Social',icon:'users',group:'nuvem'},
@@ -233,7 +234,7 @@ const ROUTES = {
 };
 
 const NAV_GROUPS = [
-  { label:'Núcleo', routes:['calendario','dashboard','campo','personagem','mercado'] },
+  { label:'Núcleo', routes:['calendario','dashboard','campo','personagem','mercado','estatisticas'] },
   { label:'Vida', routes:['habitos','academia','agua','caverna','financas'] },
   { label:'Segundo Cérebro', routes:['estudos','midia','notas'] },
   { label:'Mais', routes:['conquistas','temas','configuracoes'] },
@@ -2037,6 +2038,8 @@ function viewConquistas() {
       case 'streak_30': return p.streak >= 30;
       case 'level_5': return p.level >= 5;
       case 'level_10': return p.level >= 10;
+      case 'level_20': return p.level >= 20;
+      case 'level_50': return p.level >= 50;
       case 'first_coin': return p.coins >= 1;
       case 'hoard_100': return p.coins >= 100;
       default: return false;
@@ -2074,6 +2077,27 @@ function viewConquistas() {
       viewConquistas();
     },
   });
+}
+
+// ——— VIEW: Estatísticas ———
+function viewEstatisticas() {
+  const p = Store.get('player');
+  const missions = Store.get('missions') || [];
+  const totalDone = missions.filter(m => m.done).length;
+  document.getElementById('view').innerHTML = '<h2 style="margin-bottom:20px;font-weight:800;">' + icon('activity') + ' Estatísticas</h2>' +
+    '<div class="grid g-3" style="margin-bottom:20px;">' +
+      '<div class="kpi"><div class="ico">' + icon('zap') + '</div><div class="val">' + p.level + '</div><div class="lbl">Nível</div></div>' +
+      '<div class="kpi green"><div class="ico">' + icon('activity') + '</div><div class="val">' + (p.bestStreak||p.streak) + '</div><div class="lbl">Melhor Streak</div></div>' +
+      '<div class="kpi gold"><div class="ico">' + icon('check') + '</div><div class="val">' + totalDone + '</div><div class="lbl">Missões</div></div>' +
+    '</div>' +
+    '<div class="card"><h3 style="margin-bottom:12px;">Recordes</h3>' +
+      '<div style="display:flex;flex-direction:column;gap:8px;">' +
+        '<div class="between"><span class="muted">Melhor combo</span><span style="font-weight:700;">' + (p.bestCombo||0) + 'x</span></div>' +
+        '<div class="between"><span class="muted">Total de missões</span><span style="font-weight:700;">' + (p.totalMissionsDone||0) + '</span></div>' +
+        '<div class="between"><span class="muted">Total de hábitos</span><span style="font-weight:700;">' + (p.totalHabitsDone||0) + '</span></div>' +
+        '<div class="between"><span class="muted">Minutos de foco</span><span style="font-weight:700;">' + (p.totalFocusMinutes||0) + '</span></div>' +
+        '<div class="between"><span class="muted">Mortes (Hardcore)</span><span style="font-weight:700;">' + (p.deaths||0) + '</span></div>' +
+      '</div></div>';
 }
 
 // ——— VIEW: Temas ———
@@ -2334,6 +2358,7 @@ const VIEW_MAP = {
   caverna: viewCaverna, financas: viewFinancas, estudos: viewEstudos,
   midia: viewMidia, notas: viewNotas, conquistas: viewConquistas,
   calendario: viewCalendario,
+  estatisticas: viewEstatisticas,
   temas: viewTemas, configuracoes: viewConfiguracoes,
   social: viewSocial, clans: viewClans, rankings: viewRankings,
 };
