@@ -1370,7 +1370,7 @@ function viewAcademia() {
           <div class="lic">${icon('dumbbell')}</div>
           <div class="lbody">
             <div class="ltitle">${ex.name}</div>
-            <div class="lsub">${ex.reps||0} reps · ${ex.sets||0} séries${ex.lastDone?' · Último: '+ex.lastDone:''}</div>
+            <div class="lsub">${ex.reps||0} reps · ${ex.sets||0} séries${ex.weight?' · '+ex.weight+'kg':''}${ex.lastDone?' · Último: '+ex.lastDone:''}</div>
           </div>
           <button class="btn sm success" data-action="done-exercise" data-id="${ex.id}">${icon('check')} Feito</button>
           <button class="icon-btn" data-action="del-exercise" data-id="${ex.id}">${icon('trash')}</button>
@@ -1384,14 +1384,16 @@ function viewAcademia() {
         <div class="field"><label>Nome</label><input class="input" id="ex-name" placeholder="Ex: Flexão"></div>
         <div class="two"><div class="field"><label>Repetições</label><input class="input" id="ex-reps" type="number" value="12" min="1"></div>
         <div class="field"><label>Séries</label><input class="input" id="ex-sets" type="number" value="3" min="1"></div></div>
+        <div class="field"><label>Carga (kg) — opcional</label><input class="input" id="ex-weight" type="number" value="0" min="0" step="0.5"></div>
         <button class="btn primary full" data-action="save-exercise">${icon('plus')} Criar</button>`);
       document.querySelector('[data-action=save-exercise]')?.addEventListener('click', () => {
         const name = document.getElementById('ex-name')?.value.trim();
         if (!name) return showToast('Digite um nome.', 'hp');
         const reps = parseInt(document.getElementById('ex-reps')?.value)||12;
         const sets = parseInt(document.getElementById('ex-sets')?.value)||3;
+        const weight = parseFloat(document.getElementById('ex-weight')?.value)||0;
         const a = Store.get('academy') || [];
-        a.push({ id:uid(), name, reps, sets, lastDone: null });
+        a.push({ id:uid(), name, reps, sets, weight, lastDone: null });
         Store.set('academy', a);
         closeModal();
         viewAcademia();
@@ -1532,19 +1534,36 @@ function viewCaverna() {
 }
 
 // ——— VIEW: Finanças ———
+const CAT_COLORS = {
+  'Alimentação':'var(--success)','Transporte':'var(--energy)','Lazer':'var(--gold)',
+  'Saúde':'var(--hp)','Educação':'var(--primary)','Moradia':'var(--danger)','Outros':'var(--muted)',
+};
+function catColor(cat) { return CAT_COLORS[cat] || 'var(--muted)'; }
+
 function viewFinancas() {
   const data = Store.get('financas') || DEFAULTS.financas;
   const tx = data.transactions || [];
   const balance = tx.reduce((acc,t) => acc + (t.type==='income'?t.amount:-t.amount), 0);
   const sorted = [...tx].sort((a,b) => b.date>a.date?1:-1).slice(0,20);
 
+  // Monthly summary
+  const thisMonth = today().slice(0,7);
+  const monthTx = tx.filter(t => t.date && t.date.startsWith(thisMonth));
+  const monthIncome = monthTx.filter(t=>t.type==='income').reduce((s,t)=>s+t.amount,0);
+  const monthExpense = monthTx.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0);
+
   document.getElementById('view').innerHTML = `
     <div class="grid g-2" style="margin-bottom:16px;">
-      <div class="kpi green"><div class="ico">${icon('dollar')}</div><div class="val">R$${balance.toFixed(2)}</div><div class="lbl">Saldo</div></div>
+      <div class="kpi green"><div class="ico">${icon('dollar')}</div><div class="val">R$${balance.toFixed(2)}</div><div class="lbl">Saldo Total</div></div>
       <div style="display:flex;gap:10px;align-items:flex-end;justify-content:flex-end;">
         <button class="btn success" data-action="add-income">${icon('plus')} Receita</button>
         <button class="btn danger" data-action="add-expense">${icon('minus')||'-'} Despesa</button>
       </div>
+    </div>
+    <div class="grid g-3" style="margin-bottom:16px;">
+      <div class="kpi green"><div class="ico">${icon('plus')||'+'}</div><div class="val">R$${monthIncome.toFixed(2)}</div><div class="lbl">Receitas (mês)</div></div>
+      <div class="kpi hp"><div class="ico">${icon('minus')||'-'}</div><div class="val">R$${monthExpense.toFixed(2)}</div><div class="lbl">Despesas (mês)</div></div>
+      <div class="kpi gold"><div class="ico">${icon('coin')}</div><div class="val">R$${(monthIncome-monthExpense).toFixed(2)}</div><div class="lbl">Saldo do Mês</div></div>
     </div>
     <div class="card flush">
       ${sorted.length ? sorted.map(t => `
@@ -1552,7 +1571,7 @@ function viewFinancas() {
           <div class="lic" style="background:${t.type==='income'?'rgba(52,211,153,.13)':'rgba(244,85,107,.13)'};color:${t.type==='income'?'var(--success)':'var(--danger)'};">${icon(t.type==='income'?'plus':'minus')||' '}</div>
           <div class="lbody">
             <div class="ltitle">${t.description||'Sem descrição'}</div>
-            <div class="lsub">${t.category||''} · ${t.date||''}</div>
+            <div class="lsub"><span class="tag" style="background:${catColor(t.category)}22;color:${catColor(t.category)};border:1px solid ${catColor(t.category)}44;">● ${t.category||'Outros'}</span> · ${t.date||''}</div>
           </div>
           <div style="font-weight:800;color:${t.type==='income'?'var(--success)':'var(--danger)'};">${t.type==='income'?'+':'-'}R$${Math.abs(t.amount).toFixed(2)}</div>
           <button class="icon-btn" data-action="del-transaction" data-id="${t.id}">${icon('trash')}</button>
