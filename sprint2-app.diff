@@ -1,0 +1,366 @@
+diff --git a/app.js b/app.js
+index 05a1d52..2357812 100644
+--- a/app.js
++++ b/app.js
+@@ -38,6 +38,7 @@ const ICONS = {
+   pin:        '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M12 2L15.09 8.26L22 9.27L17 14.14L18.18 21.02L12 17.77L5.82 21.02L7 14.14L2 9.27L8.91 8.26L12 2z"/></svg>',
+   star:       '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>',
+   activity:   '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>',
++  plus:       '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>',
+ };
+ 
+ function icon(name) { return ICONS[name] || ''; }
+@@ -137,6 +138,7 @@ const DEFAULTS = {
+   notes: [],
+   market: { items: [{ id:'potion', name:'Poção de Cura', desc:'Recupera 30 HP', cost: 15 }], purchases: [] },
+   settings: { theme: 'violeta', hardcoreFail: false, hardcoreHp: false },
++  agua: { copos: 0, meta: 8, historico: {} },
+   achievements: { claimed: [] },
+   lastDailyReset: null,
+ };
+@@ -203,6 +205,8 @@ const ROUTES = {
+   academia:{label:'Academia',icon:'dumbbell',group:'vida'},
+   caverna:{label:'Caverna',icon:'clock',group:'vida'},
+   financas:{label:'Finanças',icon:'dollar',group:'vida'},
++  agua:{label:'Água',icon:'heart',group:'vida'},
++  calendario:{label:'Calendário',icon:'activity',group:'núcleo'},
+   estudos:{label:'Estudos',icon:'book',group:'cérebro'},
+   midia:{label:'Mídia',icon:'film',group:'cérebro'},
+   notas:{label:'Notas',icon:'file',group:'cérebro'},
+@@ -215,8 +219,8 @@ const ROUTES = {
+ };
+ 
+ const NAV_GROUPS = [
+-  { label:'Núcleo', routes:['dashboard','campo','personagem','mercado'] },
+-  { label:'Vida', routes:['habitos','academia','caverna','financas'] },
++  { label:'Núcleo', routes:['dashboard','campo','personagem','mercado','calendario'] },
++  { label:'Vida', routes:['habitos','academia','caverna','financas','agua'] },
+   { label:'Segundo Cérebro', routes:['estudos','midia','notas'] },
+   { label:'Mais', routes:['conquistas','temas','configuracoes'] },
+   { label:'Nuvem', routes:['social','clans','rankings'] },
+@@ -323,6 +327,11 @@ function addXP(amount, skillType) {
+   }
+   if (skillType && p.skills[skillType] !== undefined) {
+     p.skills[skillType] = (p.skills[skillType] || 0) + Math.floor(amount / 10);
++  } else if (skillType && p.customSkills) {
++    const cs = p.customSkills.find(s => s.id === skillType);
++    if (cs) {
++      cs.xp = (cs.xp || 0) + Math.floor(amount / 10);
++    }
+   }
+   Store.set('player', p);
+   State.changed('player');
+@@ -470,6 +479,8 @@ function renderTopbar(route) {
+     dashboard:'Visão geral', campo:'Missões e tarefas', personagem:'Seu perfil', mercado:'Gaste suas moedas',
+     habitos:'Rotina diária', academia:'Treinos', caverna:'Foco profundo', financas:'Seu dinheiro',
+     estudos:'Matérias e materiais', midia:'Filmes, séries e livros', notas:'Anotações rápidas',
++    agua:'Hidratação',
++    calendario:'Calendário de missões',
+     conquistas:'Troféus', temas:'Paletas de cores', configuracoes:'Ajustes',
+     social:'Comunidade', clans:'Grupos', rankings:'Leaderboard',
+   };
+@@ -593,6 +604,7 @@ function missionModal(id) {
+   const m = id ? missions.find(x => x.id === id) : null;
+   const isEdit = !!m;
+   const r = m ? calcReward(m.difficulty) : calcReward('facil');
++  const p = Store.get('player');
+ 
+   openModal(`
+     <div class="modal-head"><div class="mi">${icon('target')}</div><h2>${isEdit?'Editar':'Nova'} Missão</h2><button class="x">${icon('x')}</button></div>
+@@ -601,7 +613,8 @@ function missionModal(id) {
+     <div class="two">
+       <div class="field"><label>Habilidade</label><select class="input" id="f-skill">
+         ${Object.entries(SKILL_NAMES).map(([k,v]) => `<option value="${k}" ${isEdit&&m.skill===k?'selected':''}>${v}</option>`).join('')}
+-        <option value="custom" ${isEdit&&m.skill==='custom'?'selected':''}>Customizada</option>
++        ${(p.customSkills||[]).map(cs => `<option value="${cs.id}" ${isEdit&&m.skill===cs.id?'selected':''}>${cs.icon||'⭐'} ${cs.name}</option>`).join('')}
++        <option value="" ${isEdit&&!m.skill?'selected':''}>Nenhuma</option>
+       </select></div>
+       <div class="field"><label><input type="checkbox" id="f-daily" ${isEdit&&m.isDaily?'checked':''}> Missão diária</label></div>
+     </div>
+@@ -750,7 +763,258 @@ function viewPersonagem() {
+       <div class="kpi"><div class="ico">${icon('check')}</div><div class="val">${p.totalMissionsDone||0}</div><div class="lbl">Missões</div></div>
+       <div class="kpi green"><div class="ico">${icon('activity')}</div><div class="val">${p.totalHabitsDone||0}</div><div class="lbl">Hábitos</div></div>
+       <div class="kpi gold"><div class="ico">${icon('clock')}</div><div class="val">${p.totalFocusMinutes||0}</div><div class="lbl">Min. Foco</div></div>
++    </div>
++    <div class="card" style="margin-top:16px;">
++      <div class="between" style="margin-bottom:8px;">
++        <h3><span class="accent"></span>Skills Customizadas</h3>
++        <button class="btn sm primary" data-action="manage-custom-skills">Gerenciar Skills</button>
++      </div>
++      ${p.customSkills && p.customSkills.length ? p.customSkills.map(cs => {
++        const csLv = Math.floor((cs.xp||0) / 10) + 1;
++        const csPct = ((cs.xp||0) % 10) * 10;
++        return `<div class="xpbar-label"><span>${cs.icon||'⭐'} ${cs.name}</span><span>Lv. ${csLv}</span></div>
++          <div class="bar gold" style="margin-bottom:8px;"><i style="width:${csPct}%"></i></div>`;
++      }).join('') : '<div class="muted" style="font-size:13px;">Nenhuma skill customizada ainda.</div>'}
+     </div>`;
++  bindActions(document.getElementById('view'), {
++    'manage-custom-skills'() { customSkillsModal(); },
++  });
++}
++
++// ——— Custom Skills Modal ———
++function customSkillsModal() {
++  const p = Store.get('player');
++  const skills = p.customSkills || [];
++
++  openModal(`
++    <div class="modal-head"><div class="mi">${icon('zap')}</div><h2>Gerenciar Skills</h2><button class="x">${icon('x')}</button></div>
++    ${skills.length ? skills.map(cs => `
++      <div class="lrow" style="margin-bottom:8px;">
++        <div class="lic">${cs.icon || '⭐'}</div>
++        <div class="lbody">
++          <div class="ltitle">${escHtml(cs.name)}</div>
++          <div class="lsub">Lv. ${Math.floor((cs.xp||0)/10)+1} · ${cs.xp||0} XP</div>
++        </div>
++        <button class="icon-btn" data-action="edit-cs" data-id="${cs.id}">${icon('edit')}</button>
++        <button class="icon-btn" data-action="del-cs" data-id="${cs.id}">${icon('trash')}</button>
++      </div>`).join('') : '<div class="muted" style="margin-bottom:12px;">Nenhuma skill ainda.</div>'}
++    <button class="btn primary full" data-action="add-cs">${icon('plus')} Nova Skill</button>`);
++
++  document.querySelector('[data-action=add-cs]')?.addEventListener('click', () => { closeModal(); customSkillForm(); });
++  document.querySelectorAll('[data-action=edit-cs]').forEach(el => {
++    el.addEventListener('click', () => { const id = el.dataset.id; closeModal(); customSkillForm(id); });
++  });
++  document.querySelectorAll('[data-action=del-cs]').forEach(el => {
++    el.addEventListener('click', () => {
++      const id = el.dataset.id;
++      confirmModal('Excluir esta skill?', ok => {
++        if (!ok) return;
++        const p2 = Store.get('player');
++        p2.customSkills = (p2.customSkills||[]).filter(s => s.id !== id);
++        Store.set('player', p2);
++        State.changed('player');
++        closeModal();
++        customSkillsModal();
++        showToast('Skill excluída.', 'hp');
++      });
++    });
++  });
++}
++
++function customSkillForm(id) {
++  const p = Store.get('player');
++  const cs = id ? (p.customSkills||[]).find(s => s.id === id) : null;
++  const isEdit = !!cs;
++
++  openModal(`
++    <div class="modal-head"><div class="mi">${icon('zap')}</div><h2>${isEdit?'Editar':'Nova'} Skill</h2><button class="x">${icon('x')}</button></div>
++    <div class="field"><label>Nome</label><input class="input" id="cs-name" value="${isEdit?escHtml(cs.name):''}" placeholder="Ex: Programação"></div>
++    <div class="field"><label>Ícone (emoji)</label><input class="input" id="cs-icon" value="${isEdit?escHtml(cs.icon||''):'⭐'}" style="font-size:20px;max-width:80px;" placeholder="⭐"></div>
++    <button class="btn primary full" data-action="save-cs" data-id="${id||''}">${icon('check')} ${isEdit?'Salvar':'Criar'}</button>`);
++
++  document.querySelector('[data-action=save-cs]')?.addEventListener('click', () => {
++    const name = document.getElementById('cs-name')?.value.trim();
++    if (!name) return showToast('Digite um nome.', 'hp');
++    const icon = document.getElementById('cs-icon')?.value.trim() || '⭐';
++    const p2 = Store.get('player');
++    if (!p2.customSkills) p2.customSkills = [];
++    if (isEdit) {
++      const existing = p2.customSkills.find(s => s.id === id);
++      if (existing) { existing.name = name; existing.icon = icon; }
++    } else {
++      p2.customSkills.push({ id: uid(), name, icon, xp: 0 });
++    }
++    Store.set('player', p2);
++    State.changed('player');
++    closeModal();
++    viewPersonagem();
++    showToast(isEdit?'Skill atualizada!':'Skill criada!', 'success');
++  });
++}
++
++// ——— VIEW: Água ———
++function viewAgua() {
++  const agua = Store.get('agua') || JSON.parse(JSON.stringify(DEFAULTS.agua));
++  const coposHoje = agua.copos || 0;
++  const meta = agua.meta || 8;
++  const pct = Math.min(100, Math.round((coposHoje / meta) * 100));
++
++  document.getElementById('view').innerHTML = `
++    <div class="grid g-2" style="margin-bottom:20px;">
++      <div class="card" style="text-align:center;padding:28px;">
++        <div style="font-size:56px;margin:8px 0;">💧</div>
++        <div style="font-size:36px;font-weight:800;margin:4px 0;">${coposHoje} <span style="font-size:16px;color:var(--muted);">/ ${meta} copos</span></div>
++        <div style="margin:16px 0;">
++          <div class="xpbar-label"><span>Progresso</span><span>${pct}%</span></div>
++          <div class="bar"><i style="width:${pct}%"></i></div>
++        </div>
++        <div class="water-btns">
++          <button class="btn primary" data-action="add-water" data-amount="1">+1 Copo</button>
++          <button class="btn primary" data-action="add-water" data-amount="2">+2 Copos</button>
++          <button class="btn primary" data-action="add-water" data-amount="3">+3 Copos</button>
++        </div>
++        ${coposHoje >= meta ? '<div style="margin-top:12px;color:var(--success);font-weight:700;">Meta atingida! HP recuperado!</div>' : ''}
++      </div>
++      <div class="card">
++        <h3><span class="accent"></span>Estatísticas</h3>
++        <div style="display:flex;flex-direction:column;gap:10px;">
++          <div class="between"><span class="muted">Meta diária</span><span style="font-weight:700;">${meta} copos</span></div>
++          <div class="between"><span class="muted">Dias registrados</span><span style="font-weight:700;">${Object.keys(agua.historico||{}).length}</span></div>
++        </div>
++      </div>
++    </div>`;
++
++  bindActions(document.getElementById('view'), {
++    'add-water'(e, el) {
++      const amount = parseInt(el.dataset.amount) || 1;
++      const agua = Store.get('agua') || JSON.parse(JSON.stringify(DEFAULTS.agua));
++      agua.copos = (agua.copos || 0) + amount;
++      const meta = agua.meta || 8;
++      const hoje = today();
++      if (!agua.historico) agua.historico = {};
++      const hojeCompletou = agua.historico[hoje]?.completou || false;
++      if (agua.copos >= meta && !hojeCompletou) {
++        addXP(5, 'saude');
++        healHp(5);
++        showToast('💧 Meta de água atingida! +5XP +5HP', 'gold');
++        if (!agua.historico[hoje]) agua.historico[hoje] = { copos: agua.copos };
++        agua.historico[hoje].completou = true;
++      }
++      Store.set('agua', agua);
++      viewAgua();
++    },
++  });
++}
++
++// ——— VIEW: Calendário ———
++function viewCalendario() {
++  const d = new Date();
++  renderCalendario(d.getFullYear(), d.getMonth());
++}
++
++function renderCalendario(year, month) {
++  const missions = Store.get('missions') || [];
++  const months = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
++  const dow = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
++
++  const firstDay = new Date(year, month, 1).getDay();
++  const daysInMonth = new Date(year, month + 1, 0).getDate();
++  const hojeStr = today();
++  const hojeNum = parseInt(hojeStr.slice(8,10));
++  const hojeMes = parseInt(hojeStr.slice(5,7)) - 1;
++  const hojeAno = parseInt(hojeStr.slice(0,4));
++
++  // Build map of dates with completed missions
++  const missionDays = {};
++  missions.forEach(m => {
++    if (m.done && m.completedAt) {
++      const d = m.completedAt.slice(0,10);
++      if (!missionDays[d]) missionDays[d] = [];
++      missionDays[d].push(m);
++    }
++  });
++
++  // Current streak days (consecutive days ending today)
++  const streakDays = getStreakDays(missions);
++
++  let cells = dow.map(d => `<div class="dow">${d}</div>`).join('');
++  for (let day = 1; day <= daysInMonth; day++) {
++    const dateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
++    const isToday = day === hojeNum && month === hojeMes && year === hojeAno;
++    const hasMissions = !!missionDays[dateStr];
++    const isStreakDay = streakDays.includes(dateStr);
++
++    cells += `<div class="cell${isToday?' today':''}${hasMissions?' on':''}" data-action="cal-day" data-date="${dateStr}">
++      <span style="font-size:13px;font-weight:600;">${day}</span>
++      <span style="display:flex;gap:2px;font-size:9px;line-height:1;">${hasMissions?'<span style="color:var(--success);">●</span>':''}${isStreakDay?'<span>🔥</span>':''}</span>
++    </div>`;
++  }
++
++  document.getElementById('view').innerHTML = `
++    <div class="between" style="margin-bottom:16px;">
++      <button class="btn ghost" data-action="cal-prev">◀ ${months[month-1 < 0 ? 11 : month-1].slice(0,3)}</button>
++      <h2 style="font-weight:800;">${months[month]} ${year}</h2>
++      <button class="btn ghost" data-action="cal-next">${months[(month+1)%12].slice(0,3)} ▶</button>
++    </div>
++    <div class="cal">${cells}</div>
++    <div id="cal-detail" style="margin-top:16px;"></div>`;
++
++  bindActions(document.getElementById('view'), {
++    'cal-prev'() {
++      let m = month - 1, y = year;
++      if (m < 0) { m = 11; y--; }
++      renderCalendario(y, m);
++    },
++    'cal-next'() {
++      let m = month + 1, y = year;
++      if (m > 11) { m = 0; y++; }
++      renderCalendario(y, m);
++    },
++    'cal-day'(e, el) {
++      const date = el.dataset.date;
++      const dayMissions = missionDays[date] || [];
++      const detailEl = document.getElementById('cal-detail');
++      if (detailEl.innerHTML && detailEl.dataset.date === date) {
++        detailEl.innerHTML = '';
++        detailEl.dataset.date = '';
++      } else {
++        const diffColor = { facil:'var(--success)', media:'var(--gold)', dificil:'var(--danger)' };
++        detailEl.innerHTML = `
++          <div class="card">
++            <div class="between" style="margin-bottom:8px;">
++              <h3>📅 ${date}</h3>
++              <button class="btn ghost sm" data-action="cal-detail-close">${icon('x')}</button>
++            </div>
++            ${dayMissions.length ? dayMissions.map(m => `
++              <div class="lrow" style="margin-bottom:6px;">
++                <div class="lic" style="background:${diffColor[m.difficulty]||'var(--surface-3)'};">${icon('check')}</div>
++                <div class="lbody">
++                  <div class="ltitle">${escHtml(m.title)}</div>
++                  <div class="lsub">${DIFFICULTIES[m.difficulty]?.label||''} · +${m.reward?.xp||0}XP · +${m.reward?.coins||0} moedas</div>
++                </div>
++              </div>`).join('') : '<div class="muted">Nenhuma missão neste dia.</div>'}
++          </div>`;
++        detailEl.dataset.date = date;
++        // Bind the close button
++        detailEl.querySelector('[data-action=cal-detail-close]')?.addEventListener('click', () => {
++          detailEl.innerHTML = '';
++          detailEl.dataset.date = '';
++        });
++      }
++    },
++  });
++}
++
++function getStreakDays(missions) {
++  const dates = [...new Set(missions.filter(m => m.done && m.completedAt).map(m => m.completedAt.slice(0,10)))].sort();
++  const streak = [];
++  const cursor = new Date(today() + 'T12:00:00');
++  for (let i = 0; i < 365; i++) {
++    const ds = cursor.toISOString().slice(0,10);
++    if (dates.includes(ds)) { streak.push(ds); cursor.setDate(cursor.getDate() - 1); }
++    else break;
++  }
++  return streak;
+ }
+ 
+ // ——— VIEW: Mercado ———
+@@ -1599,6 +1863,16 @@ function checkDailyReset() {
+ 
+   Store.set('missions', missions);
+   Store.set('player', p);
++
++  // Reset água
++  const agua = Store.get('agua');
++  if (agua) {
++    if (!agua.historico) agua.historico = {};
++    agua.historico[todayStr] = { copos: agua.copos || 0, completou: (agua.copos || 0) >= (agua.meta || 8) };
++    agua.copos = 0;
++    Store.set('agua', agua);
++  }
++
+   Store.set('lastDailyReset', todayStr);
+   State.changed('player');
+ }
+@@ -1609,7 +1883,9 @@ function checkDailyReset() {
+ const VIEW_MAP = {
+   dashboard: viewDashboard, campo: viewCampo, personagem: viewPersonagem,
+   mercado: viewMercado, habitos: viewHabitos, academia: viewAcademia,
+-  caverna: viewCaverna, financas: viewFinancas, estudos: viewEstudos,
++  caverna: viewCaverna, agua: viewAgua,
++  calendario: viewCalendario,
++  financas: viewFinancas, estudos: viewEstudos,
+   midia: viewMidia, notas: viewNotas, conquistas: viewConquistas,
+   temas: viewTemas, configuracoes: viewConfiguracoes,
+   social: viewSocial, clans: viewClans, rankings: viewRankings,

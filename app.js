@@ -65,6 +65,7 @@ const DIFFICULTIES = {
 };
 
 const SKILL_NAMES = { destreza: 'Destreza', saude: 'Saúde', estudos: 'Estudos', gestao: 'Gestão' };
+const CATEGORY_ATTR_MAP = { destreza: 'disciplina', saude: 'shape', estudos: 'inteligencia', gestao: 'foco' };
 const SKILL_CLASSES = { destreza: 's-dex', saude: 's-life', estudos: 's-study', gestao: 's-mgmt' };
 const SKILL_ICONS = { destreza: 'zap', saude: 'heart', estudos: 'book', gestao: 'activity' };
 
@@ -125,7 +126,13 @@ const DEFAULTS = {
     title: 'Iniciante',
     skills: { destreza: 0, saude: 0, estudos: 0, gestao: 0 },
     customSkills: [],
+    atributos: { disciplina: 0, foco: 0, inteligencia: 0, shape: 0 },
+    gear: { head: null, body: null, weapon: null, accessory: null },
     totalMissionsDone: 0, totalHabitsDone: 0, totalFocusMinutes: 0,
+    streakFreeze: 0, dailyCombo: 0, bestCombo: 0,
+    dailyXp: 0,
+    metaBatidaHoje: false,
+    onboardingDone: false,
   },
   missions: [],
   habits: [],
@@ -135,8 +142,17 @@ const DEFAULTS = {
   estudos: { subjects: [], materials: [] },
   midia: [],
   notes: [],
-  market: { items: [{ id:'potion', name:'Poção de Cura', desc:'Recupera 30 HP', cost: 15 }], purchases: [] },
-  settings: { theme: 'violeta', hardcoreFail: false, hardcoreHp: false },
+  market: { items: [
+    { id:'potion', name:'Poção de Cura', desc:'Recupera 30 HP', cost: 15 },
+    { id:'big_potion', name:'🧪 Poção Grande', desc:'Recupera 100% do HP', cost: 40 },
+    { id:'streak_freeze', name:'❄️ Congelar Ofensiva', desc:'Protege sua ofensiva por 1 dia', cost: 30 },
+    { id:'xp_boost', name:'⚡ XP Boost', desc:'Dobra o XP por 30 minutos', cost: 50 },
+    { id:'loot_bronze', name:'🎁 Baú de Bronze', desc:'Sorteio de recompensas comuns', cost: 20 },
+    { id:'loot_silver', name:'🎁 Baú de Prata', desc:'Sorteio com itens raros', cost: 50 },
+    { id:'loot_gold', name:'👑 Baú de Ouro', desc:'Sorteio com itens épicos', cost: 100 },
+  ], purchases: [] },
+  agua: { copos: 0, meta: 8, historico: {} },
+  settings: { theme: 'violeta', hardcoreFail: false, hardcoreHp: false, dailyXpGoal: 100, maxDailyXp: 500 },
   achievements: { claimed: [] },
   lastDailyReset: null,
 };
@@ -195,18 +211,21 @@ const State = {
 // 6. ROUTES + ROUTER
 // ============================================================
 const ROUTES = {
+  calendario:{label:'Calendário',icon:'activity',group:'núcleo'},
   dashboard:{label:'Dashboard',icon:'grid',group:'núcleo'},
   campo:{label:'Campo',icon:'target',group:'núcleo'},
   personagem:{label:'Personagem',icon:'user',group:'núcleo'},
   mercado:{label:'Mercado',icon:'cart',group:'núcleo'},
   habitos:{label:'Hábitos',icon:'check',group:'vida'},
   academia:{label:'Academia',icon:'dumbbell',group:'vida'},
+  agua:{label:'Água',icon:'heart',group:'vida'},
   caverna:{label:'Caverna',icon:'clock',group:'vida'},
   financas:{label:'Finanças',icon:'dollar',group:'vida'},
   estudos:{label:'Estudos',icon:'book',group:'cérebro'},
   midia:{label:'Mídia',icon:'film',group:'cérebro'},
   notas:{label:'Notas',icon:'file',group:'cérebro'},
   conquistas:{label:'Conquistas',icon:'trophy',group:'mais'},
+  estatisticas:{label:'Estatísticas',icon:'activity',group:'núcleo'},
   temas:{label:'Temas',icon:'palette',group:'mais'},
   configuracoes:{label:'Configurações',icon:'settings',group:'mais'},
   social:{label:'Social',icon:'users',group:'nuvem'},
@@ -215,8 +234,8 @@ const ROUTES = {
 };
 
 const NAV_GROUPS = [
-  { label:'Núcleo', routes:['dashboard','campo','personagem','mercado'] },
-  { label:'Vida', routes:['habitos','academia','caverna','financas'] },
+  { label:'Núcleo', routes:['calendario','dashboard','campo','personagem','mercado','estatisticas'] },
+  { label:'Vida', routes:['habitos','academia','agua','caverna','financas'] },
   { label:'Segundo Cérebro', routes:['estudos','midia','notas'] },
   { label:'Mais', routes:['conquistas','temas','configuracoes'] },
   { label:'Nuvem', routes:['social','clans','rankings'] },
@@ -310,8 +329,28 @@ function getLevelConfig(level) {
 
 function addXP(amount, skillType) {
   const p = Store.get('player');
-  p.xp += amount;
+  const settings = Store.get('settings') || DEFAULTS.settings;
+  const goal = settings.dailyXpGoal || 100;
+  const maxDaily = settings.maxDailyXp || 500;
+
+  // Cap daily XP gain to prevent abuse
+  const currentDaily = p.dailyXp || 0;
+  const allowed = Math.max(0, maxDaily - currentDaily);
+  const actualAmount = Math.min(amount, allowed);
+  if (actualAmount <= 0 && amount > 0) return; // Hit daily cap
+  if (actualAmount < amount) showToast(`Limite diário de XP atingido (${maxDaily}XP).`, '');
+
+  p.xp += actualAmount;
+  p.dailyXp = currentDaily + actualAmount;
   let leveledUp = false;
+
+  // Check diaria meta
+  if (p.dailyXp >= goal && !p.metaBatidaHoje) {
+    p.metaBatidaHoje = true;
+    const bonusCoins = 10;
+    p.coins = (p.coins || 0) + bonusCoins;
+    showToast(`🎯 Meta diária batida! +${bonusCoins} moedas!`, 'gold');
+  }
   while (p.xp >= p.xpToNext) {
     const nextLv = p.level + 1;
     const cfg = getLevelConfig(nextLv);
@@ -322,7 +361,11 @@ function addXP(amount, skillType) {
     leveledUp = true;
   }
   if (skillType && p.skills[skillType] !== undefined) {
-    p.skills[skillType] = (p.skills[skillType] || 0) + Math.floor(amount / 10);
+    p.skills[skillType] = (p.skills[skillType] || 0) + Math.floor(actualAmount / 10);
+  }
+  else if (skillType && p.customSkills) {
+    const cs = p.customSkills.find(s => s.id === skillType);
+    if (cs) cs.xp = (cs.xp || 0) + Math.floor(actualAmount / 10);
   }
   Store.set('player', p);
   State.changed('player');
@@ -437,6 +480,7 @@ function renderSidebar(route) {
         <span class="pill hp">${icon('heart')} ${p.hp}/${p.maxHp}</span>
         <span class="pill en">${icon('zap')} ${p.streak}</span>
         <span class="pill co">${icon('coin')} ${p.coins}</span>
+        ${p.streakFreeze > 0 ? `<span class="pill ice">❄️ ${p.streakFreeze}</span>` : ''}
       </div>
       <div class="xpbar-wrap">
         <div class="xpbar-label"><span>XP</span><span>${p.xp}/${p.xpToNext}</span></div>
@@ -468,9 +512,10 @@ function renderTopbar(route) {
   const info = ROUTES[route];
   const subLabels = {
     dashboard:'Visão geral', campo:'Missões e tarefas', personagem:'Seu perfil', mercado:'Gaste suas moedas',
-    habitos:'Rotina diária', academia:'Treinos', caverna:'Foco profundo', financas:'Seu dinheiro',
+    habitos:'Rotina diária', academia:'Treinos', agua:'Hidratação', caverna:'Foco profundo', financas:'Seu dinheiro',
     estudos:'Matérias e materiais', midia:'Filmes, séries e livros', notas:'Anotações rápidas',
     conquistas:'Troféus', temas:'Paletas de cores', configuracoes:'Ajustes',
+    calendario:'Calendário de missões',
     social:'Comunidade', clans:'Grupos', rankings:'Leaderboard',
   };
 
@@ -507,9 +552,12 @@ function today() { return new Date().toISOString().slice(0,10); }
 // ——— VIEW: Dashboard ———
 function viewDashboard() {
   const p = Store.get('player');
+  const settings = Store.get('settings') || DEFAULTS.settings;
+  const dailyGoal = settings.dailyXpGoal || 100;
   const missions = Store.get('missions') || [];
   const recent = [...missions].filter(m => m.done).sort((a,b) => (b.completedAt||'')>(a.completedAt||'')?1:-1).slice(0,5);
   const pending = missions.filter(m => !m.done && m.date === today()).length;
+  const dailyPct = Math.min(100, Math.round(((p.dailyXp||0) / dailyGoal) * 100));
 
   document.getElementById('view').innerHTML = `
     <div class="grid g-4" style="margin-bottom:20px;">
@@ -517,6 +565,12 @@ function viewDashboard() {
       <div class="kpi gold"><div class="ico">${icon('coin')}</div><div class="val">${p.coins}</div><div class="lbl">Moedas</div></div>
       <div class="kpi hp"><div class="ico">${icon('heart')}</div><div class="val">${p.hp}</div><div class="lbl">HP · Nv ${p.level}</div></div>
       <div class="kpi green"><div class="ico">${icon('activity')}</div><div class="val">${p.streak}</div><div class="lbl">Ofensiva (dias)</div></div>
+    </div>
+    <div class="card" style="margin-bottom:20px;">
+      <h3><span class="accent"></span>Meta Diária de XP</h3>
+      <div class="kpi" style="margin-bottom:8px;"><div class="ico">${icon('star')}</div><div class="val">${p.dailyXp||0} / ${dailyGoal}</div><div class="lbl">${p.metaBatidaHoje?'Meta batida! 🎯':'XP hoje'}</div></div>
+      <div class="bar" style="height:12px;"><i style="width:${dailyPct}%;background:var(--gold);border-radius:999px;"></i></div>
+      <div class="muted" style="font-size:12px;margin-top:6px;text-align:right;">${dailyPct}%</div>
     </div>
     <div class="grid g-2">
       <div class="card">
@@ -541,39 +595,58 @@ function viewCampo() {
   const filter = sessionStorage.getItem('campoFilter') || 'all';
   let list = [...missions].sort((a,b) => a.done===b.done?0:(a.done?1:-1));
 
-  if (filter === 'pending') list = list.filter(m => !m.done && m.date === todayStr);
-  else if (filter === 'done') list = list.filter(m => m.done);
+  // Filter by type
+  if (filter === 'mission') list = list.filter(m => (m.type || (m.isDaily ? 'daily' : 'mission')) === 'mission');
+  else if (filter === 'daily') list = list.filter(m => (m.type || (m.isDaily ? 'daily' : 'mission')) === 'daily');
+  else if (filter === 'habit') list = list.filter(m => (m.type || 'mission') === 'habit');
+
+  // Filter by startDate: only show if startDate is null or <= today
+  list = list.filter(m => !m.startDate || m.startDate <= todayStr);
 
   const html = `
     <div class="between" style="margin-bottom:16px;">
       <div class="tabs">
-        ${['all','pending','done'].map(f =>
-          `<button class="${filter===f?'active':''}" data-action="filter" data-filter="${f}">${f==='all'?'Todas':f==='pending'?'Pendentes':'Concluídas'}</button>`
+        ${[
+          { key: 'all', label: 'Todas' },
+          { key: 'mission', label: 'Missões' },
+          { key: 'daily', label: 'Diárias' },
+          { key: 'habit', label: 'Hábitos' },
+        ].map(f =>
+          `<button class="${filter===f.key?'active':''}" data-action="filter" data-filter="${f.key}">${f.label}</button>`
         ).join('')}
       </div>
       <button class="btn primary" data-action="new-mission">${icon('plus')} Nova</button>
     </div>
     <div class="list">
       ${list.length ? list.map(m => {
+        const mType = m.type || (m.isDaily ? 'daily' : 'mission');
         const r = m.reward || calcReward(m.difficulty);
         const cls = m.done ? 'mission done' : 'mission' + (m.skill && SKILL_CLASSES[m.skill] ? ' '+SKILL_CLASSES[m.skill] : '');
+        let badges = `<span class="tag">${DIFFICULTIES[m.difficulty]?.label||'?'}</span>`;
+        if (mType === 'daily') badges += '<span class="tag b">diária</span>';
+        if (mType === 'habit') badges += '<span class="tag s">hábito</span>';
+        // Date badges
+        if (m.dueDate && !m.done) {
+          if (m.dueDate === todayStr) badges += '<span class="tag gold">📅 Vence hoje</span>';
+          else if (m.dueDate < todayStr) badges += '<span class="tag hp">⚠️ Atrasada</span>';
+        }
         return `<div class="${cls}" data-id="${m.id}">
           <div class="check" data-action="toggle-mission" data-id="${m.id}">${m.done?icon('check'):''}</div>
           <div class="m-body">
             <div class="m-title">${m.title}</div>
             <div class="m-meta">
-              <span class="tag">${DIFFICULTIES[m.difficulty]?.label||'?'}</span>
+              ${badges}
               ${m.skill?`<span class="tag v">${SKILL_NAMES[m.skill]||m.skill}</span>`:''}
-              ${m.isDaily?'<span class="tag b">diária</span>':''}
+              ${m.subtasks && m.subtasks.length ? `<span class="tag">📋 ${m.subtasks.filter(st=>st.done).length}/${m.subtasks.length}</span>` : ''}
             </div>
           </div>
-          <div class="m-reward"><span class="xp">+${r.xp}XP</span><span class="co">+${r.coins}</span></div>
+          <div class="m-reward"><span class="xp">+${r.xp}XP</span>${r.coins > 0 ? `<span class="co">+${r.coins}</span>` : ''}</div>
           <div class="m-actions">
             <button class="icon-btn" data-action="edit-mission" data-id="${m.id}">${icon('edit')}</button>
             <button class="icon-btn" data-action="delete-mission" data-id="${m.id}">${icon('trash')}</button>
           </div>
         </div>`;
-      }).join('') : `<div class="center-empty"><div class="big">${icon('target')}</div><p>Nenhuma missão ${filter==='pending'?'pendente':filter==='done'?'concluída':''}.</p></div>`}
+      }).join('') : `<div class="center-empty"><div class="big">${icon('target')}</div><p>Nenhuma missão ${filter==='all'?'':filter==='mission'?'do tipo missão':filter==='daily'?'diária':filter==='habit'?'do tipo hábito':''}.</p></div>`}
     </div>`;
 
   document.getElementById('view').innerHTML = html;
@@ -594,29 +667,65 @@ function missionModal(id) {
   const isEdit = !!m;
   const r = m ? calcReward(m.difficulty) : calcReward('facil');
 
+  // Determine type from existing mission (backward compatibility)
+  const missionType = m ? (m.type || (m.isDaily ? 'daily' : 'mission')) : 'mission';
+  const todayStr = today();
+
   openModal(`
     <div class="modal-head"><div class="mi">${icon('target')}</div><h2>${isEdit?'Editar':'Nova'} Missão</h2><button class="x">${icon('x')}</button></div>
+    <div class="field"><label>Tipo</label>
+      <div class="tabs" id="mission-type-tabs">
+        <button class="${missionType==='mission'?'active':''}" data-type="mission">Missão</button>
+        <button class="${missionType==='daily'?'active':''}" data-type="daily">Diária</button>
+        <button class="${missionType==='habit'?'active':''}" data-type="habit">Hábito</button>
+      </div>
+    </div>
     <div class="field"><label>Título</label><input class="input" id="f-title" value="${isEdit?escHtml(m.title):''}" placeholder="Ex: Estudar React"></div>
     <div class="field"><label>Descrição (opcional)</label><textarea class="textarea" id="f-desc" placeholder="Detalhes...">${isEdit?escHtml(m.description||''):''}</textarea></div>
     <div class="two">
       <div class="field"><label>Habilidade</label><select class="input" id="f-skill">
-        ${Object.entries(SKILL_NAMES).map(([k,v]) => `<option value="${k}" ${isEdit&&m.skill===k?'selected':''}>${v}</option>`).join('')}
-        <option value="custom" ${isEdit&&m.skill==='custom'?'selected':''}>Customizada</option>
+        ${(() => {
+          const _p = Store.get('player');
+          let opts = Object.entries(SKILL_NAMES).map(([k,v]) => `<option value="${k}" ${isEdit&&m.skill===k?'selected':''}>${v}</option>`);
+          if (_p.customSkills) _p.customSkills.forEach(cs => {
+            opts.push(`<option value="${cs.id}" ${isEdit&&m.skill===cs.id?'selected':''}>${cs.icon||'📌'} ${cs.name}</option>`);
+          });
+          opts.push(`<option value="" ${isEdit&&!m.skill?'selected':''}>Nenhuma</option>`);
+          return opts.join('');
+        })()}
       </select></div>
-      <div class="field"><label><input type="checkbox" id="f-daily" ${isEdit&&m.isDaily?'checked':''}> Missão diária</label></div>
-    </div>
-    <div class="field"><label>Dificuldade</label>
-      <div class="diff-grid" id="diff-grid">
-        ${Object.entries(DIFFICULTIES).map(([k,v]) => `
-          <div class="diff ${isEdit&&m.difficulty===k?'active':k==='facil'&&!isEdit?'active':''}" data-value="${k}">
-            <div class="dname">${v.label}</div>
-            <div class="dxp">+${v.xp}XP</div>
-            <div class="dco">+${v.coins}</div>
-          </div>`).join('')}
+      <div class="field"><label>Dificuldade</label>
+        <div class="diff-grid" id="diff-grid">
+          ${Object.entries(DIFFICULTIES).map(([k,v]) => `
+            <div class="diff ${isEdit&&m.difficulty===k?'active':k==='facil'&&!isEdit?'active':''}" data-value="${k}">
+              <div class="dname">${v.label}</div>
+              <div class="dxp">+${v.xp}XP</div>
+              <div class="dco">+${v.coins}</div>
+            </div>`).join('')}
+        </div>
       </div>
+    </div>
+    <div class="two" id="mission-date-fields">
+      <div class="field"><label>Data de início (opcional)</label><input class="input" id="f-start" type="date" value="${isEdit&&m.startDate?m.startDate:''}"></div>
+      <div class="field"><label>Data de vencimento (opcional)</label><input class="input" id="f-due" type="date" value="${isEdit&&m.dueDate?m.dueDate:''}"></div>
+    </div>
+    <div class="field" id="mission-habit-note" style="${missionType==='habit'?'':'display:none;'}">
+      <p class="muted" style="font-size:13px;">${icon('check')} Hábitos não dão moedas e podem ser concluídos múltiplas vezes.</p>
     </div>
     <button class="btn primary full" data-action="save-mission" data-id="${isEdit?id:''}">${icon('check')} ${isEdit?'Salvar':'Criar Missão'}</button>
   `, false);
+
+  // Type selector behavior
+  document.getElementById('mission-type-tabs')?.addEventListener('click', e => {
+    const btn = e.target.closest('button[data-type]');
+    if (!btn) return;
+    document.querySelectorAll('#mission-type-tabs button').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    // Show/hide date fields and habit note
+    const type = btn.dataset.type;
+    document.getElementById('mission-date-fields').style.display = type === 'habit' ? 'none' : '';
+    document.getElementById('mission-habit-note').style.display = type === 'habit' ? '' : 'none';
+  });
 
   document.getElementById('diff-grid')?.addEventListener('click', e => {
     const diff = e.target.closest('.diff');
@@ -630,22 +739,31 @@ function missionModal(id) {
     if (!title) return showToast('Digite um título para a missão.', 'hp');
     const desc = document.getElementById('f-desc')?.value.trim() || '';
     const skill = document.getElementById('f-skill')?.value || 'destreza';
-    const isDaily = document.getElementById('f-daily')?.checked || false;
+    const typeBtn = document.querySelector('#mission-type-tabs .active');
+    const type = typeBtn ? typeBtn.dataset.type : 'mission';
+    const isDaily = type === 'daily';
     const diffEl = document.querySelector('.diff.active');
     const difficulty = diffEl ? diffEl.dataset.value : 'facil';
     const reward = calcReward(difficulty);
+    const startDate = document.getElementById('f-start')?.value || null;
+    const dueDate = document.getElementById('f-due')?.value || null;
+
+    // Habits give no coins
+    if (type === 'habit') {
+      reward.coins = 0;
+    }
 
     if (isEdit) {
       const missions = Store.get('missions') || [];
       const idx = missions.findIndex(x => x.id === id);
       if (idx >= 0) {
-        missions[idx] = { ...missions[idx], title, description: desc, skill, difficulty, isDaily, reward };
+        missions[idx] = { ...missions[idx], title, description: desc, skill, difficulty, type, isDaily, reward, startDate, dueDate };
         Store.set('missions', missions);
         showToast('Missão atualizada!', 'success');
       }
     } else {
       const missions = Store.get('missions') || [];
-      missions.push({ id:uid(), title, description:desc, skill, difficulty, done:false, date:today(), createdAt:new Date().toISOString(), completedAt:null, isDaily, reward });
+      missions.push({ id: uid(), title, description: desc, skill, difficulty, done: false, date: todayStr, createdAt: new Date().toISOString(), completedAt: null, isDaily, reward, type, startDate, dueDate, subtasks: [] });
       Store.set('missions', missions);
       showToast(`Missão criada! (+${reward.xp}XP quando concluir)`, '');
     }
@@ -658,6 +776,21 @@ function toggleMission(id) {
   const missions = Store.get('missions') || [];
   const m = missions.find(x => x.id === id);
   if (!m) return;
+  const mType = m.type || (m.isDaily ? 'daily' : 'mission');
+
+  // Habits are repeatable: grant XP but don't mark as done
+  if (mType === 'habit') {
+    const r = m.reward || calcReward(m.difficulty);
+    const p = Store.get('player');
+    p.totalHabitsDone = (p.totalHabitsDone || 0) + 1;
+    Store.set('player', p);
+    addXP(r.xp, m.skill);
+    // Habits grant no coins
+    showToast(`✅ ${m.title} concluído! +${r.xp}XP`, 'gold');
+    viewCampo();
+    return;
+  }
+
   if (m.done) return showToast('Missão já concluída.', '');
 
   m.done = true;
@@ -670,7 +803,38 @@ function toggleMission(id) {
   addXP(m.reward.xp, m.skill);
   addCoins(m.reward.coins);
   updateStreak();
+  // Daily combo increment
+  const pCombo = Store.get('player');
+  pCombo.dailyCombo = (pCombo.dailyCombo || 0) + 1;
+  if (pCombo.dailyCombo > (pCombo.bestCombo || 0)) pCombo.bestCombo = pCombo.dailyCombo;
+  Store.set('player', pCombo);
+  if (pCombo.dailyCombo > 1) {
+    const comboBonus = pCombo.dailyCombo;
+    addCoins(comboBonus);
+  }
+  // Increment atributo based on skill
+  if (m.skill && CATEGORY_ATTR_MAP[m.skill]) {
+    const attr = CATEGORY_ATTR_MAP[m.skill];
+    const pAttr = Store.get('player');
+    if (!pAttr.atributos) pAttr.atributos = { disciplina: 0, foco: 0, inteligencia: 0, shape: 0 };
+    pAttr.atributos[attr] = (pAttr.atributos[attr] || 0) + 1;
+    Store.set('player', pAttr);
+  }
   showToast(`✅ ${m.title} concluída! +${m.reward.xp}XP +${m.reward.coins} moedas`, 'gold');
+  // Check for loot box drop (25% chance)
+  if (Math.random() < 0.25) {
+    const lootTypes = [
+      { name: 'Moedas', icon: '🪙', get: () => addCoins(5) },
+      { name: 'HP', icon: '❤️', get: () => healHp(10) },
+      { name: 'Poção', icon: '🧪', get: () => { showToast('🎁 Recompensa extra: Poção!', 'gold'); } },
+    ];
+    const drop = lootTypes[Math.floor(Math.random() * lootTypes.length)];
+    drop.get();
+    showToast(`🎁 Recompensa extra! ${drop.icon} ${drop.name}`, 'gold');
+  }
+  // Combo toast
+  const pc = Store.get('player');
+  if (pc.dailyCombo > 1) showToast(`🔥 Combo x${pc.dailyCombo}!`, 'gold');
   viewCampo();
 }
 
@@ -750,7 +914,290 @@ function viewPersonagem() {
       <div class="kpi"><div class="ico">${icon('check')}</div><div class="val">${p.totalMissionsDone||0}</div><div class="lbl">Missões</div></div>
       <div class="kpi green"><div class="ico">${icon('activity')}</div><div class="val">${p.totalHabitsDone||0}</div><div class="lbl">Hábitos</div></div>
       <div class="kpi gold"><div class="ico">${icon('clock')}</div><div class="val">${p.totalFocusMinutes||0}</div><div class="lbl">Min. Foco</div></div>
+    </div>
+    <div class="card" style="margin-top:20px;">
+      <h3><span class="accent"></span>Atributos</h3>
+      <div class="grid g-2" style="margin-top:8px;">
+        ${Object.entries(p.atributos||{disciplina:0,foco:0,inteligencia:0,shape:0}).map(([k,v]) =>
+          `<div><div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:2px;"><span>${k.charAt(0).toUpperCase()+k.slice(1)}</span><span>Lv. ${Math.floor(v/5)+1}</span></div>
+          <div class="bar" style="height:8px;"><i style="width:${Math.min(100,(v%5)*20)}%"></i></div></div>`
+        ).join('')}
+      </div>
+    </div>
+    ${p.customSkills && p.customSkills.length ? `
+    <div class="card" style="margin-top:20px;">
+      <div class="between" style="margin-bottom:12px;">
+        <h3><span class="accent"></span>Skills Customizadas</h3>
+        <button class="btn sm primary" data-action="manage-custom-skills">${icon('edit')} Gerenciar Skills</button>
+      </div>
+      ${p.customSkills.map(cs => {
+        const csLevel = Math.floor((cs.xp||0)/10)+1;
+        const csPct = Math.min(100, (cs.xp||0)%10*10);
+        return `<div style="margin-bottom:10px;">
+          <div class="xpbar-label"><span>${cs.icon||'📌'} ${cs.name}</span><span>Lv. ${csLevel}</span></div>
+          <div class="bar gold"><i style="width:${csPct}%"></i></div>
+        </div>`;
+      }).join('')}
+    </div>` : ''}`;
+
+  bindActions(document.getElementById('view'), {
+    'manage-custom-skills'() { customSkillsModal(); },
+  });
+}
+
+// ============================================================
+// 11c. CUSTOM SKILLS
+// ============================================================
+
+function customSkillsModal() {
+  const p = Store.get('player');
+  const cs = p.customSkills || [];
+
+  openModal(`
+    <div class="modal-head"><div class="mi">${icon('zap')}</div><h2>Skills Customizadas</h2><button class="x">${icon('x')}</button></div>
+    <div style="margin-bottom:14px;">
+      <button class="btn primary full" data-action="new-custom-skill">${icon('plus')} Nova Skill</button>
+    </div>
+    ${cs.length ? cs.map(s => {
+      const sl = Math.floor((s.xp||0)/10)+1;
+      const sp = Math.min(100,(s.xp||0)%10*10);
+      return `<div class="lrow">
+        <div class="lic">${s.icon||'📌'}</div>
+        <div class="lbody">
+          <div class="ltitle">${s.name}</div>
+          <div class="lsub">Lv. ${sl}</div>
+        </div>
+        <div style="width:80px;"><div class="bar gold"><i style="width:${sp}%"></i></div></div>
+        <button class="icon-btn" data-action="edit-custom-skill" data-id="${s.id}">${icon('edit')}</button>
+        <button class="icon-btn" data-action="del-custom-skill" data-id="${s.id}">${icon('trash')}</button>
+      </div>`;
+    }).join('') : '<div class="center-empty"><p>Nenhuma skill customizada.</p></div>'}
+  `);
+
+  bindActions(document.getElementById('modal-root'), {
+    'new-custom-skill'() { closeModal(); customSkillForm(); },
+    'edit-custom-skill'(e, el) { closeModal(); customSkillForm(el.dataset.id); },
+    'del-custom-skill'(e, el) {
+      confirmModal('Excluir esta skill?', ok => {
+        if (!ok) return;
+        const p = Store.get('player');
+        p.customSkills = (p.customSkills||[]).filter(s => s.id !== el.dataset.id);
+        Store.set('player', p);
+        State.changed('player');
+        closeModal();
+        customSkillsModal();
+        showToast('Skill excluída.', 'hp');
+      });
+    },
+  });
+}
+
+function customSkillForm(id) {
+  const p = Store.get('player');
+  const existing = id ? (p.customSkills||[]).find(s => s.id === id) : null;
+  const isEdit = !!existing;
+
+  openModal(`
+    <div class="modal-head"><div class="mi">${icon('zap')}</div><h2>${isEdit?'Editar':'Nova'} Skill Customizada</h2><button class="x">${icon('x')}</button></div>
+    <div class="field"><label>Nome</label><input class="input" id="cs-name" value="${isEdit?escHtml(existing.name):''}" placeholder="Ex: Programação"></div>
+    <div class="field"><label>Ícone (emoji)</label><input class="input" id="cs-icon" value="${isEdit?escHtml(existing.icon||'📌'):'📌'}" placeholder="📌" style="font-size:20px;max-width:80px;"></div>
+    <button class="btn primary full" data-action="save-custom-skill" data-id="${id||''}">${icon('check')} ${isEdit?'Salvar':'Criar'}</button>
+  `);
+
+  document.querySelector('[data-action=save-custom-skill]')?.addEventListener('click', () => {
+    const name = document.getElementById('cs-name')?.value.trim();
+    if (!name) return showToast('Digite um nome para a skill.', 'hp');
+    const icon = document.getElementById('cs-icon')?.value.trim() || '📌';
+    const p = Store.get('player');
+    if (!p.customSkills) p.customSkills = [];
+    if (isEdit) {
+      const s = p.customSkills.find(x => x.id === id);
+      if (s) { s.name = name; s.icon = icon; }
+    } else {
+      p.customSkills.push({ id: uid(), name, icon, xp: 0 });
+    }
+    Store.set('player', p);
+    State.changed('player');
+    closeModal();
+    customSkillsModal();
+    showToast(isEdit?'Skill atualizada!':'Skill criada!', 'success');
+  });
+}
+
+// ——— VIEW: Água ———
+function viewAgua() {
+  const p = Store.get('player');
+  const agua = Store.get('agua') || DEFAULTS.agua;
+  const copos = agua.copos || 0;
+  const meta = agua.meta || 8;
+  const pct = Math.min(100, Math.round(copos / meta * 100));
+  const todayStr = today();
+  const hist = agua.historico || {};
+  const histEntries = Object.entries(hist).sort((a,b) => b[0]>a[0]?1:-1).slice(0,7);
+
+  document.getElementById('view').innerHTML = `
+    <div class="grid g-2" style="margin-bottom:20px;">
+      <div class="card" style="text-align:center;padding:30px;">
+        <div style="font-size:72px;margin-bottom:8px;">💧</div>
+        <div style="font-size:48px;font-weight:800;color:var(--primary-bright);">${copos}/${meta}</div>
+        <div class="muted" style="font-size:14px;margin-bottom:16px;">copos de água hoje</div>
+        <div class="bar" style="height:16px;margin-bottom:20px;"><i style="width:${pct}%;background:var(--primary);border-radius:999px;"></i></div>
+        <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap;">
+          <button class="btn primary" data-action="add-copo">${icon('plus')} +1 copo</button>
+          <button class="btn primary" data-action="add-copo-2">${icon('plus')} +2 copos</button>
+          <button class="btn ghost" data-action="rem-copo">${icon('x')} -1</button>
+        </div>
+        <div style="margin-top:12px;">
+          <button class="btn sm ghost" data-action="set-meta">${icon('edit')} Meta: ${meta} copos</button>
+        </div>
+      </div>
+      <div class="card">
+        <h3><span class="accent"></span>Últimos Dias</h3>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          ${histEntries.length ? histEntries.map(([date, count]) => `
+            <div class="between">
+              <span style="font-size:13px;">${new Date(date+'T00:00:00').toLocaleDateString('pt-BR',{weekday:'short',day:'numeric',month:'short'})}</span>
+              <span style="font-weight:700;color:var(--primary-bright);">${'💧'.repeat(Math.min(count,8))} ${count}</span>
+            </div>`).join('') : '<div class="muted" style="font-size:13px;">Nenhum registro ainda.</div>'}
+        </div>
+      </div>
+    </div>
+    <div class="kpi"><div class="ico">${icon('heart')}</div><div class="val">${agua.totalDias||0}</div><div class="lbl">Dias com meta batida</div></div>`;
+
+  bindActions(document.getElementById('view'), {
+    'add-copo'() {
+      const agua = Store.get('agua') || DEFAULTS.agua;
+      agua.copos = (agua.copos||0) + 1;
+      if (agua.copos <= agua.meta) addXP(3, 'saude');
+      Store.set('agua', agua);
+      viewAgua();
+    },
+    'add-copo-2'() {
+      const agua = Store.get('agua') || DEFAULTS.agua;
+      agua.copos = (agua.copos||0) + 2;
+      if (agua.copos <= agua.meta) addXP(5, 'saude');
+      Store.set('agua', agua);
+      viewAgua();
+    },
+    'rem-copo'() {
+      const agua = Store.get('agua') || DEFAULTS.agua;
+      if ((agua.copos||0) > 0) agua.copos--;
+      Store.set('agua', agua);
+      viewAgua();
+    },
+    'set-meta'() {
+      const agua = Store.get('agua') || DEFAULTS.agua;
+      openModal(`
+        <div class="modal-head"><div class="mi">${icon('heart')}</div><h2>Meta de Água</h2><button class="x">${icon('x')}</button></div>
+        <div class="field"><label>Copos por dia</label><input class="input" id="agua-meta" type="number" value="${agua.meta||8}" min="1" max="30"></div>
+        <button class="btn primary full" data-action="save-agua-meta">Salvar</button>`);
+      document.querySelector('[data-action=save-agua-meta]')?.addEventListener('click', () => {
+        const v = parseInt(document.getElementById('agua-meta')?.value)||8;
+        const agua = Store.get('agua') || DEFAULTS.agua;
+        agua.meta = v;
+        Store.set('agua', agua);
+        closeModal();
+        viewAgua();
+        showToast('Meta atualizada!', 'success');
+      });
+    },
+  });
+}
+
+// ——— VIEW: Calendário ———
+function viewCalendario() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth();
+
+  document.getElementById('view').innerHTML = `
+    <div class="card" style="margin-bottom:16px;">
+      <div class="between" style="margin-bottom:8px;">
+        <button class="btn ghost sm" data-action="prev-month">${icon('x')} Anterior</button>
+        <h3 style="margin:0;" id="cal-title">${now.toLocaleDateString('pt-BR',{month:'long',year:'numeric'})}</h3>
+        <button class="btn ghost sm" data-action="next-month">Próximo ${icon('x')}</button>
+      </div>
+      <div id="cal-grid"></div>
+    </div>
+    <div class="card">
+      <h3><span class="accent"></span>Ofensiva</h3>
+      <div id="cal-streak"></div>
     </div>`;
+
+  let calYear = year, calMonth = month;
+  renderCalendario(calYear, calMonth);
+
+  bindActions(document.getElementById('view'), {
+    'prev-month'() {
+      calMonth--;
+      if (calMonth < 0) { calMonth = 11; calYear--; }
+      renderCalendario(calYear, calMonth);
+      document.getElementById('cal-title').textContent = new Date(calYear, calMonth).toLocaleDateString('pt-BR',{month:'long',year:'numeric'});
+    },
+    'next-month'() {
+      calMonth++;
+      if (calMonth > 11) { calMonth = 0; calYear++; }
+      renderCalendario(calYear, calMonth);
+      document.getElementById('cal-title').textContent = new Date(calYear, calMonth).toLocaleDateString('pt-BR',{month:'long',year:'numeric'});
+    },
+  });
+}
+
+function renderCalendario(year, month) {
+  const missions = Store.get('missions') || [];
+  const doneDates = missions.filter(m => m.done && m.completedAt).map(m => m.completedAt.slice(0,10));
+  const uniqueDates = [...new Set(doneDates)];
+
+  const firstDay = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const todayStr = today();
+
+  let html = '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;text-align:center;">';
+  const dayNames = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+  dayNames.forEach(d => { html += `<div style="font-size:11px;color:var(--muted);padding:4px 0;">${d}</div>`; });
+
+  for (let i = 0; i < firstDay; i++) {
+    html += '<div></div>';
+  }
+
+  for (let day = 1; day <= daysInMonth; day++) {
+    const dateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+    const hasMission = uniqueDates.includes(dateStr);
+    const isToday = dateStr === todayStr;
+    html += `<div style="padding:6px 0;border-radius:10px;background:${isToday?'var(--primary-dim)':'transparent'};font-weight:${isToday?'700':'400'};position:relative;">
+      <span style="font-size:13px;">${day}</span>
+      ${hasMission ? '<div style="width:6px;height:6px;border-radius:50%;background:var(--primary);margin:2px auto 0;"></div>' : ''}
+    </div>`;
+  }
+
+  html += '</div>';
+  document.getElementById('cal-grid').innerHTML = html;
+
+  // Streak
+  const streak = getStreakDays(uniqueDates);
+  document.getElementById('cal-streak').innerHTML = `
+    <div style="display:flex;align-items:center;gap:12px;">
+      <div style="font-size:36px;">${streak >= 7 ? '🔥' : streak >= 3 ? '💪' : '📅'}</div>
+      <div><div style="font-size:24px;font-weight:800;">${streak}</div><div class="muted" style="font-size:13px;">dias consecutivos com missões</div></div>
+    </div>`;
+}
+
+function getStreakDays(missionsDates) {
+  if (!missionsDates || !missionsDates.length) return 0;
+  const sorted = [...missionsDates].sort().reverse();
+  let streak = 0;
+  const todayStr = today();
+  const yesterday = new Date(Date.now()-86400000).toISOString().slice(0,10);
+
+  // Check if today or yesterday has a mission
+  if (sorted[0] === todayStr || sorted[0] === yesterday) {
+    let check = sorted[0];
+    for (const d of sorted) {
+      if (d === check) { streak++; check = new Date(new Date(d+'T00:00:00').getTime()-86400000).toISOString().slice(0,10); }
+      else break;
+    }
+  }
+  return streak;
 }
 
 // ——— VIEW: Mercado ———
@@ -807,7 +1254,32 @@ function viewMercado() {
         if (!ok) return;
         if (spendCoins(item.cost)) {
           if (item.id === 'potion') { healHp(30); showToast('🧪 HP recuperado! (+30)', 'success'); }
-          else showToast(`🎁 ${item.name} adquirido!`, 'gold');
+          else if (item.id === 'big_potion') { healHp(999); showToast('🧪 HP totalmente recuperado!', 'success'); }
+          else if (item.id === 'streak_freeze') {
+            const p = Store.get('player');
+            p.streakFreeze = Math.min(3, (p.streakFreeze || 0) + 1);
+            Store.set('player', p);
+            State.changed('player');
+            showToast(`❄️ Freeze ativado! (${p.streakFreeze}/3)`, 'gold');
+          }
+          else if (item.id === 'xp_boost') {
+            const p = Store.get('player');
+            p.xpBoostUntil = Date.now() + 30 * 60 * 1000;
+            Store.set('player', p); State.changed('player');
+            showToast('⚡ XP Boost ativo por 30 min!', 'gold');
+          }
+          else if (item.id.startsWith('loot_')) {
+            const tier = { bronze: ['comum','comum','raro'], silver: ['raro','raro','epico'], gold: ['epico','epico','lendario'] }[item.id.split('_')[1]] || ['comum'];
+            const rarity = tier[Math.floor(Math.random() * tier.length)];
+            const rewards = {
+              comum: () => { healHp(5); addCoins(3); showToast('🎁 Recompensa Comum: +3 moedas +5HP', 'gold'); },
+              raro: () => { healHp(15); addCoins(10); showToast('🎁 Recompensa Rara: +10 moedas +15HP', 'gold'); },
+              epico: () => { healHp(30); addCoins(25); showToast('🎁 Recompensa Épica: +25 moedas +30HP!', 'gold'); },
+              lendario: () => { addCoins(100); showToast('👑 Recompensa Lendária: +100 moedas!!', 'gold'); },
+            };
+            (rewards[rarity] || rewards.comum)();
+          }
+          else { showToast(`🎁 ${item.name} adquirido!`, 'gold'); }
           viewMercado();
         } else {
           showToast('Moedas insuficientes!', 'hp');
@@ -899,7 +1371,7 @@ function viewAcademia() {
           <div class="lic">${icon('dumbbell')}</div>
           <div class="lbody">
             <div class="ltitle">${ex.name}</div>
-            <div class="lsub">${ex.reps||0} reps · ${ex.sets||0} séries${ex.lastDone?' · Último: '+ex.lastDone:''}</div>
+            <div class="lsub">${ex.reps||0} reps · ${ex.sets||0} séries${ex.weight?' · '+ex.weight+'kg':''}${ex.lastDone?' · Último: '+ex.lastDone:''}</div>
           </div>
           <button class="btn sm success" data-action="done-exercise" data-id="${ex.id}">${icon('check')} Feito</button>
           <button class="icon-btn" data-action="del-exercise" data-id="${ex.id}">${icon('trash')}</button>
@@ -913,14 +1385,16 @@ function viewAcademia() {
         <div class="field"><label>Nome</label><input class="input" id="ex-name" placeholder="Ex: Flexão"></div>
         <div class="two"><div class="field"><label>Repetições</label><input class="input" id="ex-reps" type="number" value="12" min="1"></div>
         <div class="field"><label>Séries</label><input class="input" id="ex-sets" type="number" value="3" min="1"></div></div>
+        <div class="field"><label>Carga (kg) — opcional</label><input class="input" id="ex-weight" type="number" value="0" min="0" step="0.5"></div>
         <button class="btn primary full" data-action="save-exercise">${icon('plus')} Criar</button>`);
       document.querySelector('[data-action=save-exercise]')?.addEventListener('click', () => {
         const name = document.getElementById('ex-name')?.value.trim();
         if (!name) return showToast('Digite um nome.', 'hp');
         const reps = parseInt(document.getElementById('ex-reps')?.value)||12;
         const sets = parseInt(document.getElementById('ex-sets')?.value)||3;
+        const weight = parseFloat(document.getElementById('ex-weight')?.value)||0;
         const a = Store.get('academy') || [];
-        a.push({ id:uid(), name, reps, sets, lastDone: null });
+        a.push({ id:uid(), name, reps, sets, weight, lastDone: null });
         Store.set('academy', a);
         closeModal();
         viewAcademia();
@@ -1061,19 +1535,36 @@ function viewCaverna() {
 }
 
 // ——— VIEW: Finanças ———
+const CAT_COLORS = {
+  'Alimentação':'var(--success)','Transporte':'var(--energy)','Lazer':'var(--gold)',
+  'Saúde':'var(--hp)','Educação':'var(--primary)','Moradia':'var(--danger)','Outros':'var(--muted)',
+};
+function catColor(cat) { return CAT_COLORS[cat] || 'var(--muted)'; }
+
 function viewFinancas() {
   const data = Store.get('financas') || DEFAULTS.financas;
   const tx = data.transactions || [];
   const balance = tx.reduce((acc,t) => acc + (t.type==='income'?t.amount:-t.amount), 0);
   const sorted = [...tx].sort((a,b) => b.date>a.date?1:-1).slice(0,20);
 
+  // Monthly summary
+  const thisMonth = today().slice(0,7);
+  const monthTx = tx.filter(t => t.date && t.date.startsWith(thisMonth));
+  const monthIncome = monthTx.filter(t=>t.type==='income').reduce((s,t)=>s+t.amount,0);
+  const monthExpense = monthTx.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amount,0);
+
   document.getElementById('view').innerHTML = `
     <div class="grid g-2" style="margin-bottom:16px;">
-      <div class="kpi green"><div class="ico">${icon('dollar')}</div><div class="val">R$${balance.toFixed(2)}</div><div class="lbl">Saldo</div></div>
+      <div class="kpi green"><div class="ico">${icon('dollar')}</div><div class="val">R$${balance.toFixed(2)}</div><div class="lbl">Saldo Total</div></div>
       <div style="display:flex;gap:10px;align-items:flex-end;justify-content:flex-end;">
         <button class="btn success" data-action="add-income">${icon('plus')} Receita</button>
         <button class="btn danger" data-action="add-expense">${icon('minus')||'-'} Despesa</button>
       </div>
+    </div>
+    <div class="grid g-3" style="margin-bottom:16px;">
+      <div class="kpi green"><div class="ico">${icon('plus')||'+'}</div><div class="val">R$${monthIncome.toFixed(2)}</div><div class="lbl">Receitas (mês)</div></div>
+      <div class="kpi hp"><div class="ico">${icon('minus')||'-'}</div><div class="val">R$${monthExpense.toFixed(2)}</div><div class="lbl">Despesas (mês)</div></div>
+      <div class="kpi gold"><div class="ico">${icon('coin')}</div><div class="val">R$${(monthIncome-monthExpense).toFixed(2)}</div><div class="lbl">Saldo do Mês</div></div>
     </div>
     <div class="card flush">
       ${sorted.length ? sorted.map(t => `
@@ -1081,7 +1572,7 @@ function viewFinancas() {
           <div class="lic" style="background:${t.type==='income'?'rgba(52,211,153,.13)':'rgba(244,85,107,.13)'};color:${t.type==='income'?'var(--success)':'var(--danger)'};">${icon(t.type==='income'?'plus':'minus')||' '}</div>
           <div class="lbody">
             <div class="ltitle">${t.description||'Sem descrição'}</div>
-            <div class="lsub">${t.category||''} · ${t.date||''}</div>
+            <div class="lsub"><span class="tag" style="background:${catColor(t.category)}22;color:${catColor(t.category)};border:1px solid ${catColor(t.category)}44;">● ${t.category||'Outros'}</span> · ${t.date||''}</div>
           </div>
           <div style="font-weight:800;color:${t.type==='income'?'var(--success)':'var(--danger)'};">${t.type==='income'?'+':'-'}R$${Math.abs(t.amount).toFixed(2)}</div>
           <button class="icon-btn" data-action="del-transaction" data-id="${t.id}">${icon('trash')}</button>
@@ -1352,6 +1843,185 @@ function noteModal(id) {
 
 function escHtml(s) { if (!s) return ''; return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
+// ============================================================
+// 11b. ONBOARDING GAMIFICADO
+// ============================================================
+const ONBOARDING_AVATARS = ['😺','🦊','🐉','🦅','🐺'];
+
+function showOnboarding() {
+  let step = 1;
+  const totalSteps = 4;
+
+  function renderStep() {
+    let html = '';
+    if (step === 1) {
+      html = `
+        <div class="onboarding-container">
+          <div class="onboarding-progress">${Array.from({length:totalSteps},(_,i)=>`<div class="odot ${i<step?'done':''} ${i===step-1?'active':''}"></div>`).join('')}</div>
+          <h2 class="onboarding-title">Bem-vindo ao Z&Ecaron;NITE!</h2>
+          <p style="color:var(--muted);margin-bottom:16px;">Quem &eacute; voc&ecirc;, aventureiro?</p>
+          <div style="margin-bottom:16px;">
+            <label style="font-size:13px;color:var(--muted);display:block;margin-bottom:6px;">Escolha seu avatar</label>
+            <div class="onboarding-avatars">
+              ${ONBOARDING_AVATARS.map(a => `<div class="oavatar" data-avatar="${a}">${a}</div>`).join('')}
+            </div>
+          </div>
+          <div class="field"><label>Seu nome</label><input class="input" id="onb-name" value="Aventureiro" placeholder="Digite seu nome"></div>
+          <button class="btn primary full" data-action="onb-next">Pr&oacute;ximo</button>
+        </div>`;
+    } else if (step === 2) {
+      html = `
+        <div class="onboarding-container">
+          <div class="onboarding-progress">${Array.from({length:totalSteps},(_,i)=>`<div class="odot ${i<step?'done':''} ${i===step-1?'active':''}"></div>`).join('')}</div>
+          <h2 class="onboarding-title">Suas Habilidades</h2>
+          <p style="color:var(--muted);margin-bottom:16px;">Escolha pelo menos 2 habilidades para come&ccedil;ar (voc&ecirc; pode criar uma customizada tamb&eacute;m).</p>
+          <div style="margin-bottom:12px;">
+            ${Object.entries(SKILL_NAMES).map(([k,v]) => `
+              <label class="onb-skill" data-skill="${k}">
+                <input type="checkbox" checked> <span>${icon(SKILL_ICONS[k])} ${v}</span>
+              </label>`).join('')}
+          </div>
+          <div style="margin-bottom:16px;">
+            <button class="btn ghost sm" data-action="onb-custom-skill">${icon('plus')} Criar skill customizada</button>
+            <div id="onb-custom-area" style="display:none;margin-top:8px;">
+              <div class="two">
+                <div class="field"><input class="input" id="onb-cs-name" placeholder="Nome da skill"></div>
+                <div class="field"><input class="input" id="onb-cs-icon" placeholder="Emoji" value="📌" style="font-size:18px;max-width:70px;"></div>
+              </div>
+            </div>
+          </div>
+          <button class="btn primary full" data-action="onb-next">Pr&oacute;ximo</button>
+        </div>`;
+    } else if (step === 3) {
+      html = `
+        <div class="onboarding-container">
+          <div class="onboarding-progress">${Array.from({length:totalSteps},(_,i)=>`<div class="odot ${i<step?'done':''} ${i===step-1?'active':''}"></div>`).join('')}</div>
+          <h2 class="onboarding-title">Sua Primeira Miss&atilde;o</h2>
+          <p style="color:var(--muted);margin-bottom:16px;">Crie uma miss&atilde;o simples para come&ccedil;ar sua jornada.</p>
+          <div class="field"><label>T&iacute;tulo</label><input class="input" id="onb-m-title" placeholder="Ex: Estudar 30 minutos"></div>
+          <div class="field"><label>Dificuldade</label>
+            <div class="diff-grid" id="onb-diff-grid">
+              ${Object.entries(DIFFICULTIES).map(([k,v]) => `
+                <div class="diff ${k==='facil'?'active':''}" data-value="${k}">
+                  <div class="dname">${v.label}</div>
+                  <div class="dxp">+${v.xp}XP</div>
+                  <div class="dco">+${v.coins}</div>
+                </div>`).join('')}
+            </div>
+          </div>
+          <button class="btn primary full" data-action="onb-next">Pr&oacute;ximo</button>
+        </div>`;
+    } else if (step === 4) {
+      html = `
+        <div class="onboarding-container">
+          <div class="onboarding-progress">${Array.from({length:totalSteps},(_,i)=>`<div class="odot ${i<step?'done':''} ${i===step-1?'active':''}"></div>`).join('')}</div>
+          <h2 class="onboarding-title">Sua Jornada Come&ccedil;a!</h2>
+          <p style="color:var(--muted);margin-bottom:16px;">Veja como o jogo funciona:</p>
+          <div class="grid g-2" style="margin-bottom:16px;">
+            <div class="card" style="padding:14px;text-align:center;"><div style="font-size:28px;font-weight:800;color:var(--primary-bright);">XP</div><div class="muted" style="font-size:12px;">Complete miss&otilde;es para ganhar experi&ecirc;ncia e subir de n&iacute;vel.</div></div>
+            <div class="card" style="padding:14px;text-align:center;"><div style="font-size:28px;font-weight:800;color:var(--gold);">${icon('coin')}</div><div class="muted" style="font-size:12px;">Moedas para comprar itens no Mercado.</div></div>
+            <div class="card" style="padding:14px;text-align:center;"><div style="font-size:28px;font-weight:800;color:var(--hp);">HP</div><div class="muted" style="font-size:12px;">N&atilde;o deixe suas miss&otilde;es acumularem ou perder&aacute; vida!</div></div>
+            <div class="card" style="padding:14px;text-align:center;"><div style="font-size:28px;font-weight:800;color:var(--energy);">${icon('activity')}</div><div class="muted" style="font-size:12px;">Mantenha a ofensiva de dias consecutivos para ganhar b&ocirc;nus.</div></div>
+          </div>
+          <div style="background:var(--surface-2);border-radius:12px;padding:14px;margin-bottom:16px;text-align:center;">
+            <div style="font-size:14px;color:var(--muted);">Recompensa de boas-vindas:</div>
+            <div style="font-size:20px;font-weight:800;color:var(--gold);">+50 XP &middot; +10 moedas</div>
+          </div>
+          <button class="btn primary full" data-action="onb-finish">${icon('check')} Come&ccedil;ar Jornada!</button>
+        </div>`;
+    }
+
+    openModal(html, true);
+
+    // Bind step-specific events
+    if (step === 1) {
+      document.querySelectorAll('.oavatar').forEach(el => {
+        el.addEventListener('click', () => {
+          document.querySelectorAll('.oavatar').forEach(a => a.classList.remove('selected'));
+          el.classList.add('selected');
+        });
+      });
+      // Default select first avatar
+      const first = document.querySelector('.oavatar');
+      if (first) first.classList.add('selected');
+    }
+
+    if (step === 2) {
+      document.querySelector('[data-action=onb-custom-skill]')?.addEventListener('click', () => {
+        const area = document.getElementById('onb-custom-area');
+        area.style.display = area.style.display === 'none' ? 'block' : 'none';
+      });
+    }
+
+    if (step === 3) {
+      document.getElementById('onb-diff-grid')?.addEventListener('click', e => {
+        const diff = e.target.closest('.diff');
+        if (!diff) return;
+        document.querySelectorAll('.diff').forEach(d => d.classList.remove('active'));
+        diff.classList.add('active');
+      });
+    }
+
+    // Bind next/finish buttons
+    document.querySelector('[data-action=onb-next]')?.addEventListener('click', () => {
+      // Validate step 1
+      if (step === 1) {
+        const name = document.getElementById('onb-name')?.value.trim() || 'Aventureiro';
+        const avatarEl = document.querySelector('.oavatar.selected');
+        const avatar = avatarEl ? avatarEl.dataset.avatar : '😺';
+        const p = Store.get('player');
+        p.name = name;
+        p.avatar = avatar;
+        Store.set('player', p);
+      }
+      // Validate step 2
+      if (step === 2) {
+        const checked = document.querySelectorAll('.onb-skill input:checked');
+        if (checked.length < 2) return showToast('Escolha pelo menos 2 habilidades.', 'hp');
+        const p = Store.get('player');
+        checked.forEach(el => {
+          const skillKey = el.closest('.onb-skill')?.dataset.skill;
+          if (skillKey && p.skills[skillKey] !== undefined) p.skills[skillKey] = 10;
+        });
+        // Save custom skill if provided
+        const csName = document.getElementById('onb-cs-name')?.value.trim();
+        const csIcon = document.getElementById('onb-cs-icon')?.value.trim() || '📌';
+        if (csName) {
+          if (!p.customSkills) p.customSkills = [];
+          p.customSkills.push({ id: uid(), name: csName, icon: csIcon, xp: 0 });
+        }
+        Store.set('player', p);
+      }
+      // Validate step 3
+      if (step === 3) {
+        const title = document.getElementById('onb-m-title')?.value.trim();
+        if (!title) return showToast('Digite um título para a missão.', 'hp');
+        const diffEl = document.querySelector('.diff.active');
+        const difficulty = diffEl ? diffEl.dataset.value : 'facil';
+        const reward = calcReward(difficulty);
+        const missions = Store.get('missions') || [];
+        missions.push({ id: uid(), title, description: '', skill: '', difficulty, done: false, date: today(), createdAt: new Date().toISOString(), completedAt: null, isDaily: false, reward, type: 'mission', startDate: null, dueDate: null });
+        Store.set('missions', missions);
+      }
+      step++;
+      renderStep();
+    });
+
+    document.querySelector('[data-action=onb-finish]')?.addEventListener('click', () => {
+      const p = Store.get('player');
+      p.onboardingDone = true;
+      addXP(50, '');
+      addCoins(10);
+      Store.set('player', p);
+      closeModal();
+      showToast('🎉 Boas-vindas! +50XP +10 moedas!', 'gold');
+      renderAll();
+    });
+  }
+
+  renderStep();
+}
+
 // ——— VIEW: Conquistas ———
 function viewConquistas() {
   const p = Store.get('player');
@@ -1368,6 +2038,8 @@ function viewConquistas() {
       case 'streak_30': return p.streak >= 30;
       case 'level_5': return p.level >= 5;
       case 'level_10': return p.level >= 10;
+      case 'level_20': return p.level >= 20;
+      case 'level_50': return p.level >= 50;
       case 'first_coin': return p.coins >= 1;
       case 'hoard_100': return p.coins >= 100;
       default: return false;
@@ -1405,6 +2077,27 @@ function viewConquistas() {
       viewConquistas();
     },
   });
+}
+
+// ——— VIEW: Estatísticas ———
+function viewEstatisticas() {
+  const p = Store.get('player');
+  const missions = Store.get('missions') || [];
+  const totalDone = missions.filter(m => m.done).length;
+  document.getElementById('view').innerHTML = '<h2 style="margin-bottom:20px;font-weight:800;">' + icon('activity') + ' Estatísticas</h2>' +
+    '<div class="grid g-3" style="margin-bottom:20px;">' +
+      '<div class="kpi"><div class="ico">' + icon('zap') + '</div><div class="val">' + p.level + '</div><div class="lbl">Nível</div></div>' +
+      '<div class="kpi green"><div class="ico">' + icon('activity') + '</div><div class="val">' + (p.bestStreak||p.streak) + '</div><div class="lbl">Melhor Streak</div></div>' +
+      '<div class="kpi gold"><div class="ico">' + icon('check') + '</div><div class="val">' + totalDone + '</div><div class="lbl">Missões</div></div>' +
+    '</div>' +
+    '<div class="card"><h3 style="margin-bottom:12px;">Recordes</h3>' +
+      '<div style="display:flex;flex-direction:column;gap:8px;">' +
+        '<div class="between"><span class="muted">Melhor combo</span><span style="font-weight:700;">' + (p.bestCombo||0) + 'x</span></div>' +
+        '<div class="between"><span class="muted">Total de missões</span><span style="font-weight:700;">' + (p.totalMissionsDone||0) + '</span></div>' +
+        '<div class="between"><span class="muted">Total de hábitos</span><span style="font-weight:700;">' + (p.totalHabitsDone||0) + '</span></div>' +
+        '<div class="between"><span class="muted">Minutos de foco</span><span style="font-weight:700;">' + (p.totalFocusMinutes||0) + '</span></div>' +
+        '<div class="between"><span class="muted">Mortes (Hardcore)</span><span style="font-weight:700;">' + (p.deaths||0) + '</span></div>' +
+      '</div></div>';
 }
 
 // ——— VIEW: Temas ———
@@ -1466,6 +2159,14 @@ function viewConfiguracoes() {
       <div class="field">
         <div class="between"><label style="margin:0;cursor:pointer;">Perder vida ao falhar (-10HP por missão)</label><div class="switch ${settings.hardcoreHp?'on':''}" data-action="toggle-setting" data-key="hardcoreHp"></div></div>
       </div>
+      <div class="field">
+        <label>Meta Diária de XP</label>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          ${[50,100,150,200,500].map(v =>
+            `<button class="btn sm ${(settings.dailyXpGoal||100)===v?'primary':'ghost'}" data-action="set-xp-goal" data-value="${v}">${v} XP</button>`
+          ).join('')}
+        </div>
+      </div>
     </div>
 
     <div class="card" style="margin-bottom:16px;">
@@ -1502,6 +2203,14 @@ function viewConfiguracoes() {
       viewConfiguracoes();
       const label = key === 'hardcoreFail' ? 'Auto-falha' : key === 'hardcoreHp' ? 'Perder vida' : 'Opção';
       showToast(label + ' ' + (s[key] ? 'ativada' : 'desativada') + '.', '');
+    },
+    'set-xp-goal'(e, el) {
+      const val = parseInt(el.dataset.value);
+      const s = Store.get('settings') || DEFAULTS.settings;
+      s.dailyXpGoal = val;
+      Store.set('settings', s);
+      viewConfiguracoes();
+      showToast(`Meta diária: ${val} XP`, 'success');
     },
     'export-data'() {
       const data = Store.export();
@@ -1569,27 +2278,46 @@ function checkDailyReset() {
 
   let hpLost = 0;
 
-  // Auto-fail incomplete missions from yesterday
+  // Auto-fail incomplete missions that are past due
   if (settings.hardcoreFail) {
     missions.forEach(m => {
-      if (!m.done && m.date && m.date < todayStr && !m.isDaily) {
-        if (settings.hardcoreHp) hpLost += 10;
+      const mType = m.type || (m.isDaily ? 'daily' : 'mission');
+      // Only damage missions with past dueDate (or missions without type/isDaily from old data with m.date < today)
+      if (!m.done && mType !== 'habit') {
+        if (m.dueDate && m.dueDate < todayStr) {
+          if (settings.hardcoreHp) hpLost += 10;
+        } else if (!m.type && !m.isDaily && m.date && m.date < todayStr) {
+          // Legacy: old missions without type/isDaily, check m.date
+          if (settings.hardcoreHp) hpLost += 10;
+        }
       }
     });
   }
 
-  // Reset daily missions
+  // Reset daily missions (both new type='daily' and legacy isDaily)
   missions.forEach(m => {
-    if (m.isDaily && m.done && m.date !== todayStr) {
+    const mType = m.type || (m.isDaily ? 'daily' : 'mission');
+    if (mType === 'daily') {
+      if (m.done && m.date !== todayStr) {
+        m.done = false;
+        m.date = todayStr;
+      }
+      // Also reset habits with done=true from previous day's legacy behavior
+    } else if (m.isDaily && m.done && m.date !== todayStr) {
       m.done = false;
       m.date = todayStr;
     }
   });
 
-  // Streak check
+  // Streak check with freeze protection
   const yesterday = new Date(Date.now()-86400000).toISOString().slice(0,10);
   if (last && last !== yesterday) {
-    p.streak = 0;
+    if (p.streakFreeze > 0) {
+      p.streakFreeze--;
+      showToast(`❄️ Ofensiva protegida! (${p.streakFreeze}/3 freezes restantes)`, '');
+    } else {
+      p.streak = 0;
+    }
   }
 
   if (hpLost > 0) {
@@ -1599,7 +2327,24 @@ function checkDailyReset() {
 
   Store.set('missions', missions);
   Store.set('player', p);
+
+  // Save agua daily history and reset
+  const agua = Store.get('agua') || DEFAULTS.agua;
+  if ((agua.copos||0) > 0) {
+    if (!agua.historico) agua.historico = {};
+    agua.historico[todayStr] = agua.copos;
+    if (agua.copos >= (agua.meta||8)) agua.totalDias = (agua.totalDias||0) + 1;
+    agua.copos = 0;
+    Store.set('agua', agua);
+  }
+
+  // Reset daily XP meta
+  p.dailyXp = 0;
+  p.dailyCombo = 0;
+  p.metaBatidaHoje = false;
+
   Store.set('lastDailyReset', todayStr);
+  Store.set('player', p);
   State.changed('player');
 }
 
@@ -1609,8 +2354,11 @@ function checkDailyReset() {
 const VIEW_MAP = {
   dashboard: viewDashboard, campo: viewCampo, personagem: viewPersonagem,
   mercado: viewMercado, habitos: viewHabitos, academia: viewAcademia,
+  agua: viewAgua,
   caverna: viewCaverna, financas: viewFinancas, estudos: viewEstudos,
   midia: viewMidia, notas: viewNotas, conquistas: viewConquistas,
+  calendario: viewCalendario,
+  estatisticas: viewEstatisticas,
   temas: viewTemas, configuracoes: viewConfiguracoes,
   social: viewSocial, clans: viewClans, rankings: viewRankings,
 };
@@ -1650,6 +2398,12 @@ function init() {
 
   // Run daily reset
   checkDailyReset();
+
+  // Show onboarding for new players
+  const p = Store.get('player');
+  if (!p.onboardingDone) {
+    setTimeout(showOnboarding, 300);
+  }
 
   // Check achievements on load
   checkAchievements();

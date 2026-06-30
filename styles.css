@@ -359,3 +359,22 @@ svg.ic { width: 1em; height: 1em; flex: 0 0 auto; vertical-align: -0.14em; strok
   .g-4 { grid-template-columns: 1fr 1fr; }
   .water-btns { grid-template-columns: repeat(2,1fr); }
 }
+
+/* ===================== ONBOARDING ===================== */
+.onboarding-container { text-align: center; padding: 8px 0; }
+.onboarding-progress { display: flex; justify-content: center; gap: 8px; margin-bottom: 20px; }
+.odot { width: 10px; height: 10px; border-radius: 50%; background: var(--surface-3); transition: .2s; }
+.odot.done { background: var(--primary); }
+.odot.active { background: var(--primary-bright); box-shadow: 0 0 0 3px var(--primary-dim); }
+.onboarding-title { font-size: 22px; font-weight: 800; margin-bottom: 8px; }
+.onboarding-avatars { display: flex; justify-content: center; gap: 12px; flex-wrap: wrap; }
+.oavatar { width: 56px; height: 56px; border-radius: 16px; display: grid; place-items: center; font-size: 28px; background: var(--surface-2); border: 2px solid var(--border); cursor: pointer; transition: .15s; }
+.oavatar:hover { border-color: var(--border-strong); }
+.oavatar.selected { border-color: var(--primary); background: var(--primary-dim); box-shadow: 0 0 0 2px var(--primary-dim); }
+.onb-skill { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: var(--r-sm); background: var(--surface-2); border: 1px solid var(--border); margin-bottom: 6px; cursor: pointer; font-weight: 600; font-size: 14px; transition: .15s; }
+.onb-skill:hover { border-color: var(--border-strong); }
+.onb-skill input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--primary); }
+
+/* ===================== TAG VARIATIONS ===================== */
+.tag.gold { background: var(--gold-dim); color: var(--gold); }
+.tag.hp { background: rgba(244,85,107,.13); color: var(--danger); }
