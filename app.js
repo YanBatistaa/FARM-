@@ -129,7 +129,7 @@ const DEFAULTS = {
     atributos: { disciplina: 0, foco: 0, inteligencia: 0, shape: 0 },
     gear: { head: null, body: null, weapon: null, accessory: null },
     totalMissionsDone: 0, totalHabitsDone: 0, totalFocusMinutes: 0,
-    streakFreeze: 0,
+    streakFreeze: 0, dailyCombo: 0, bestCombo: 0,
     dailyXp: 0,
     metaBatidaHoje: false,
     onboardingDone: false,
@@ -802,6 +802,15 @@ function toggleMission(id) {
   addXP(m.reward.xp, m.skill);
   addCoins(m.reward.coins);
   updateStreak();
+  // Daily combo increment
+  const pCombo = Store.get('player');
+  pCombo.dailyCombo = (pCombo.dailyCombo || 0) + 1;
+  if (pCombo.dailyCombo > (pCombo.bestCombo || 0)) pCombo.bestCombo = pCombo.dailyCombo;
+  Store.set('player', pCombo);
+  if (pCombo.dailyCombo > 1) {
+    const comboBonus = pCombo.dailyCombo;
+    addCoins(comboBonus);
+  }
   // Increment atributo based on skill
   if (m.skill && CATEGORY_ATTR_MAP[m.skill]) {
     const attr = CATEGORY_ATTR_MAP[m.skill];
@@ -822,6 +831,9 @@ function toggleMission(id) {
     drop.get();
     showToast(`🎁 Recompensa extra! ${drop.icon} ${drop.name}`, 'gold');
   }
+  // Combo toast
+  const pc = Store.get('player');
+  if (pc.dailyCombo > 1) showToast(`🔥 Combo x${pc.dailyCombo}!`, 'gold');
   viewCampo();
 }
 
@@ -2285,6 +2297,7 @@ function checkDailyReset() {
 
   // Reset daily XP meta
   p.dailyXp = 0;
+  p.dailyCombo = 0;
   p.metaBatidaHoje = false;
 
   Store.set('lastDailyReset', todayStr);
