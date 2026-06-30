@@ -141,7 +141,12 @@ const DEFAULTS = {
   notes: [],
   market: { items: [
     { id:'potion', name:'Poção de Cura', desc:'Recupera 30 HP', cost: 15 },
+    { id:'big_potion', name:'🧪 Poção Grande', desc:'Recupera 100% do HP', cost: 40 },
     { id:'streak_freeze', name:'❄️ Congelar Ofensiva', desc:'Protege sua ofensiva por 1 dia', cost: 30 },
+    { id:'xp_boost', name:'⚡ XP Boost', desc:'Dobra o XP por 30 minutos', cost: 50 },
+    { id:'loot_bronze', name:'🎁 Baú de Bronze', desc:'Sorteio de recompensas comuns', cost: 20 },
+    { id:'loot_silver', name:'🎁 Baú de Prata', desc:'Sorteio com itens raros', cost: 50 },
+    { id:'loot_gold', name:'👑 Baú de Ouro', desc:'Sorteio com itens épicos', cost: 100 },
   ], purchases: [] },
   agua: { copos: 0, meta: 8, historico: {} },
   settings: { theme: 'violeta', hardcoreFail: false, hardcoreHp: false, dailyXpGoal: 100, maxDailyXp: 500 },
@@ -794,6 +799,17 @@ function toggleMission(id) {
   addCoins(m.reward.coins);
   updateStreak();
   showToast(`✅ ${m.title} concluída! +${m.reward.xp}XP +${m.reward.coins} moedas`, 'gold');
+  // Check for loot box drop (25% chance)
+  if (Math.random() < 0.25) {
+    const lootTypes = [
+      { name: 'Moedas', icon: '🪙', get: () => addCoins(5) },
+      { name: 'HP', icon: '❤️', get: () => healHp(10) },
+      { name: 'Poção', icon: '🧪', get: () => { showToast('🎁 Recompensa extra: Poção!', 'gold'); } },
+    ];
+    const drop = lootTypes[Math.floor(Math.random() * lootTypes.length)];
+    drop.get();
+    showToast(`🎁 Recompensa extra! ${drop.icon} ${drop.name}`, 'gold');
+  }
   viewCampo();
 }
 
@@ -1204,6 +1220,7 @@ function viewMercado() {
         if (!ok) return;
         if (spendCoins(item.cost)) {
           if (item.id === 'potion') { healHp(30); showToast('🧪 HP recuperado! (+30)', 'success'); }
+          else if (item.id === 'big_potion') { healHp(999); showToast('🧪 HP totalmente recuperado!', 'success'); }
           else if (item.id === 'streak_freeze') {
             const p = Store.get('player');
             p.streakFreeze = Math.min(3, (p.streakFreeze || 0) + 1);
@@ -1211,7 +1228,24 @@ function viewMercado() {
             State.changed('player');
             showToast(`❄️ Freeze ativado! (${p.streakFreeze}/3)`, 'gold');
           }
-          else showToast(`🎁 ${item.name} adquirido!`, 'gold');
+          else if (item.id === 'xp_boost') {
+            const p = Store.get('player');
+            p.xpBoostUntil = Date.now() + 30 * 60 * 1000;
+            Store.set('player', p); State.changed('player');
+            showToast('⚡ XP Boost ativo por 30 min!', 'gold');
+          }
+          else if (item.id.startsWith('loot_')) {
+            const tier = { bronze: ['comum','comum','raro'], silver: ['raro','raro','epico'], gold: ['epico','epico','lendario'] }[item.id.split('_')[1]] || ['comum'];
+            const rarity = tier[Math.floor(Math.random() * tier.length)];
+            const rewards = {
+              comum: () => { healHp(5); addCoins(3); showToast('🎁 Recompensa Comum: +3 moedas +5HP', 'gold'); },
+              raro: () => { healHp(15); addCoins(10); showToast('🎁 Recompensa Rara: +10 moedas +15HP', 'gold'); },
+              epico: () => { healHp(30); addCoins(25); showToast('🎁 Recompensa Épica: +25 moedas +30HP!', 'gold'); },
+              lendario: () => { addCoins(100); showToast('👑 Recompensa Lendária: +100 moedas!!', 'gold'); },
+            };
+            (rewards[rarity] || rewards.comum)();
+          }
+          else { showToast(`🎁 ${item.name} adquirido!`, 'gold'); }
           viewMercado();
         } else {
           showToast('Moedas insuficientes!', 'hp');
