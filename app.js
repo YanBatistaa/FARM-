@@ -135,6 +135,7 @@ const DEFAULTS = {
     onboardingDone: false,
     bossHp: 0, bossMaxHp: 100, bossName: '', bossLore: '', bossDefeated: 0, bossActive: false,
     pet: { name: '', stage: 0, xp: 0, evolutions: 0, },
+    capa: 0,
   },
   missions: [],
   habits: [],
@@ -2223,6 +2224,12 @@ function viewConfiguracoes() {
         <div class="field"><label>Nome</label><input class="input" id="cfg-name" value="${escHtml(p.name)}"></div>
         <div class="field"><label>Avatar (emoji)</label><input class="input" id="cfg-avatar" value="${p.avatar||'😺'}" style="font-size:20px;"></div>
       </div>
+      <div class="field"><label>Plano de Fundo</label>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px;">
+          ${CAPAS.map((c, i) => `<button class="btn ${(p.capa||0)===i?'primary':'ghost'}" data-action="set-capa" data-idx="${i}" style="width:60px;height:40px;border-radius:8px;padding:2px;background:${c.gradient};${(p.capa||0)===i?'border:2px solid var(--primary);':''}" title="${c.name}"></button>`).join('')}
+        </div>
+      </div>
+      </div>
       <button class="btn primary" data-action="save-profile">${icon('check')} Salvar Perfil</button>
     </div>
 
@@ -2328,6 +2335,15 @@ function viewConfiguracoes() {
 
 // ——— CLOUD PLACEHOLDER VIEWS ———
 function viewSocial() { cloudPlaceholder('Social', 'users'); }
+// ——— Capas ———
+const CAPAS = [
+  { name: 'Padrão', gradient: 'linear-gradient(135deg, var(--bg), var(--surface))' },
+  { name: 'Noite Estrelada', gradient: 'linear-gradient(135deg, #0B0913, #1A1040, #0B0913)' },
+  { name: 'Floresta', gradient: 'linear-gradient(135deg, #0B130B, #104010, #0B130B)' },
+  { name: 'Fogo', gradient: 'linear-gradient(135deg, #1A0B0B, #401010, #1A0B0B)' },
+  { name: 'Oceano', gradient: 'linear-gradient(135deg, #0B0B1A, #104070, #0B0B1A)' },
+  { name: 'Neon', gradient: 'linear-gradient(135deg, #0B0913, #20B0D0, #A885F6)' },
+];
 // ——— Mascote/Pet ———
 const PET_STAGES = [
   { icon: '🥚', name: 'Ovo', desc: 'Choca seu ovo com missões diárias!' },
@@ -2673,6 +2689,19 @@ function init() {
 
   // Start router (renders everything)
   Router.init();
+
+  // Keyboard shortcuts
+  document.addEventListener('keydown', e => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    switch (e.key) {
+      case 'n': case 'N': Router.navigate('campo'); setTimeout(() => document.querySelector('[data-action=new-mission]')?.click(), 50); break;
+      case 'd': case 'D': Router.navigate('dashboard'); break;
+      case 'c': case 'C': Router.navigate('campo'); break;
+      case 'p': case 'P': Router.navigate('personagem'); break;
+      case 'm': case 'M': Router.navigate('mercado'); break;
+      case '?': showToast('\u2328 n:Nova \u00B7 d:Dash \u00B7 c:Campo \u00B7 p:Personagem \u00B7 m:Mercado \u00B7 ?:Ajuda', ''); break;
+    }
+  });
 
   // Expose for debugging
   window.__zenite = { Store, State, Router };
